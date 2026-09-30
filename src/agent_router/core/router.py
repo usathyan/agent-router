@@ -3,12 +3,19 @@
 Rules (in order):
 1. disabled, or hook point not enabled                    -> SKIPPED
 2. pending call already targets the catalog (loop guard)  -> SKIPPED
-3. no catalog entry eligible at this point / tool         -> SKIPPED
+   tool/skill input matches ``config.skip_input``          -> SKIPPED
+   prompt text matches ``config.skip_prompt``              -> SKIPPED
+3. no catalog entry eligible at this point / tool / agent -> SKIPPED
+   entries whose fit check (``fits``) says they cannot run the pending call are dropped
+   here, before the decider, so a call they cannot do never spends their once-per-turn hint;
+   if that leaves none                                     -> SKIPPED ("does not fit")
 4. build the decider state from the event
 5. ask the decider; any exception                         -> NATIVE (fail open)
 6. choice outside the offered options                     -> NATIVE, recorded as ``none``
 7. ``none`` or p(choice) < threshold                      -> NATIVE
+   (the entry's own ``threshold`` when the catalog sets one, else the config's)
 8. enforce mode at TOOL -> ENFORCE (deny) every time; marks the entry as suggested
+   (never for an ``agent`` entry: denying the Agent call would drop the delegation)
 9. entry already suggested this (session, turn) -> SKIPPED; else SUGGEST (hint)
 Every call writes exactly one audit record.
 """
@@ -18,12 +25,15 @@ from __future__ import annotations
 import json
 import logging
 import math
+import re
 import threading
+from collections.abc import Iterable
 from dataclasses import replace
 
 from agent_router.core.audit import AuditLog
 from agent_router.core.catalog import Catalog
 from agent_router.core.config import RouterConfig
+from agent_router.core.fit import FITS
 from agent_router.core.hints import render_deny, render_hint
 from agent_router.core.types import (
     NONE_ID,
@@ -40,6 +50,8 @@ from agent_router.deciders.base import Decider
 log = logging.getLogger(__name__)
 
 OWN_TOOL_PREFIX = "mcp__agent_router__"
+OWN_PLUGIN_TOOL = re.compile(r"^mcp__plugin_.+_agent_router__")
+"""The same tools served by a Claude Code plugin (``mcp__plugin_<plugin>_agent_router__x``)."""
 NONE_OPTION = OptionSpec("the agent's own tools are enough")
 MAX_TOOL_INPUT = 500
 MAX_RECENT = 3
@@ -102,13 +114,21 @@ class Router:
         decider: Decider,
         config: RouterConfig | None = None,
         audit: AuditLog | None = None,
+        suggested: Iterable[tuple[str, int, str]] = (),
     ) -> None:
+        """``suggested`` seeds the once-per-(session, turn, entry) hint set, for hosts that
+        run each hook in a fresh process (see ``adapters.claude_code``)."""
         self.catalog = catalog
         self.decider = decider
         self.config = config if config is not None else RouterConfig()
         self.audit = audit if audit is not None else AuditLog(self.config.audit_path)
-        self._suggested: set[tuple[str, int, str]] = set()
+        self._suggested: set[tuple[str, int, str]] = set(suggested)
         self._lock = threading.Lock()
+
+    def suggested(self) -> set[tuple[str, int, str]]:
+        """The (session, turn, entry) keys already hinted or enforced."""
+        with self._lock:
+            return set(self._suggested)
 
     def route(self, event: RouterEvent) -> Decision:
         cfg = self.config
@@ -131,14 +151,36 @@ class Router:
         tool_name = event.tool_name
         tool_input = event.tool_input if isinstance(event.tool_input, dict) else {}
         skill = tool_input.get("skill")
-        if self.catalog.owns_target(tool_name, skill=skill if isinstance(skill, str) else None) or (
-            tool_name is not None and tool_name.startswith(OWN_TOOL_PREFIX)
+        subagent = tool_input.get("subagent_type")
+        if self.catalog.owns_target(
+            tool_name,
+            skill=skill if isinstance(skill, str) else None,
+            subagent=subagent if isinstance(subagent, str) else None,
+        ) or (
+            tool_name is not None
+            and (tool_name.startswith(OWN_TOOL_PREFIX) or OWN_PLUGIN_TOOL.match(tool_name))
         ):
             return Decision(Action.SKIPPED, "own tool")
+        if cfg.skip_input and event.point in (HookPoint.TOOL, HookPoint.SKILL):
+            try:
+                if re.search(cfg.skip_input, build_state(replace(event, text="", recent=()))):
+                    return Decision(Action.SKIPPED, "skip pattern")
+            except re.error:  # a bad pattern disables the skip rule, never the hook
+                log.warning("invalid skip_input pattern %r", cfg.skip_input)
+        if cfg.skip_prompt and event.point == HookPoint.PROMPT:
+            try:
+                if re.search(cfg.skip_prompt, event.text or ""):
+                    return Decision(Action.SKIPPED, "skip pattern")
+            except re.error:
+                log.warning("invalid skip_prompt pattern %r", cfg.skip_prompt)
         # 3. structural eligibility
-        eligible = self.catalog.eligible(event.point, tool_name)
+        eligible = self.catalog.eligible(event.point, tool_name, event.agent_type)
         if not eligible:
             return Decision(Action.SKIPPED, "no eligible entries")
+        unfit = [e.id for e in eligible if e.fits and not FITS[e.fits](tool_input)]
+        eligible = [e for e in eligible if e.id not in unfit]
+        if not eligible:
+            return Decision(Action.SKIPPED, f"does not fit: {', '.join(unfit)}")
         options = {e.id: e.option() for e in eligible} | {NONE_ID: NONE_OPTION}
         option_ids = tuple(options)
         # 5. ask the decider, failing open
@@ -160,29 +202,32 @@ class Router:
         # 7. abstain / threshold
         if choice == NONE_ID:
             return Decision(Action.NATIVE, "decider chose none", result=result, options=option_ids)
+        entry = self.catalog.get(choice)
+        assert entry is not None  # eligible entries come from the catalog
+        threshold = entry.threshold if entry.threshold is not None else cfg.threshold
         prob = float(result.probabilities.get(choice, 0.0))
-        if prob < cfg.threshold:
+        if prob < threshold:
             return Decision(
                 Action.NATIVE,
-                f"p={prob:.3f} below threshold {cfg.threshold:.3f}",
+                f"p={prob:.3f} below threshold {threshold:.3f}",
                 entry_id=choice,
                 result=result,
                 options=option_ids,
+                threshold=threshold,
             )
-        entry = self.catalog.get(choice)
-        assert entry is not None  # eligible entries come from the catalog
         key = (event.session_id, event.turn_id, entry.id)
         # 8. enforce at TOOL denies every matching call; it marks but never consults the set
-        if cfg.mode == "enforce" and event.point == HookPoint.TOOL:
+        if cfg.mode == "enforce" and event.point == HookPoint.TOOL and entry.kind != "agent":
             with self._lock:
                 self._suggested.add(key)
             return Decision(
                 Action.ENFORCE,
-                f"p={prob:.3f} >= {cfg.threshold:.3f}, enforce mode",
+                f"p={prob:.3f} at or above threshold {threshold:.3f}, enforce mode",
                 entry_id=entry.id,
                 hint=render_deny(entry, tool_name or ""),
                 result=result,
                 options=option_ids,
+                threshold=threshold,
             )
         # 9. advisory hints: once per (session, turn, entry)
         with self._lock:
@@ -193,13 +238,15 @@ class Router:
                     entry_id=entry.id,
                     result=result,
                     options=option_ids,
+                    threshold=threshold,
                 )
             self._suggested.add(key)
         return Decision(
             Action.SUGGEST,
-            f"p={prob:.3f} >= {cfg.threshold:.3f}",
+            f"p={prob:.3f} at or above threshold {threshold:.3f}",
             entry_id=entry.id,
             hint=render_hint(entry, event.point, prob),
             result=result,
             options=option_ids,
+            threshold=threshold,
         )

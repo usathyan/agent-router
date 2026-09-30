@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+# agent-router command hook for the first-principles integration.
+# Hook JSON on stdin, hook JSON on stdout. Fails open: prints {} whenever it cannot route.
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+integ="$(dirname "$(dirname "$here")")"   # integrations/first-principles
+repo="$(dirname "$(dirname "$integ")")"
+bin="${AGENT_ROUTER_BIN:-$repo/.venv/bin/agent-router}"
+if [ ! -x "$bin" ]; then
+  cat >/dev/null
+  echo '{}'
+  exit 0
+fi
+payload="$(cat)"
+# Fast path: a main-thread Bash call has no eligible entry (exact-calc is scoped to the
+# first-principles agent), so answer without starting Python.
+# (A false match only means the full path runs; routing itself decides.)
+bash_re='"tool_name"[[:space:]]*:[[:space:]]*"Bash"'
+agent_re='"agent_type"[[:space:]]*:'
+if [[ $payload =~ $bash_re ]] && ! [[ $payload =~ $agent_re ]]; then
+  echo '{}'
+  exit 0
+fi
+export AGENT_ROUTER_CATALOG="${AGENT_ROUTER_CATALOG:-$integ/catalog.yaml}"
+export AGENT_ROUTER_CALIBRATION="${AGENT_ROUTER_CALIBRATION:-$integ/calibration.json}"
+export AGENT_ROUTER_MODE=advisory
+# the agent's own report commands (.first-principles/analysis-*.md) are never routed: appends
+# name the file, in-place revisions often `cd` into the directory first, so match the name alone
+export AGENT_ROUTER_SKIP_INPUT="${AGENT_ROUTER_SKIP_INPUT:-\.first-principles\b}"
+# a prompt that already launches first-principles (/first-principles:...) needs no delegation
+# note: in the 28 example runs the note fired on 10 such prompts and could change nothing
+export AGENT_ROUTER_SKIP_PROMPT="${AGENT_ROUTER_SKIP_PROMPT:-^\s*/first-principles:}"
+export HF_HUB_DISABLE_PROGRESS_BARS=1
+printf '%s' "$payload" | exec "$bin" hook

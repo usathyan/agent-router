@@ -75,3 +75,10 @@ def test_owns_target():
     assert cat.owns_target("mcp__agent_router__calc")
     assert cat.owns_target("Skill", skill="commit-writer")
     assert not cat.owns_target("Bash")
+
+
+def test_fit_check_is_loaded_and_unknown_ones_rejected(tmp_path):
+    cat = load_catalog(_write(tmp_path, _entry("a") + "    fits: calc_expression\n"))
+    assert cat.entries[0].fits == "calc_expression"
+    with pytest.raises(CatalogError, match="unknown fit check 'eval'"):
+        load_catalog(_write(tmp_path, _entry("b") + "    fits: eval\n"))

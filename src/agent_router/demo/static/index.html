@@ -21,6 +21,7 @@
       <button role="tab" id="tab-play" aria-controls="view-play" aria-selected="true">Playground</button>
       <button role="tab" id="tab-live" aria-controls="view-live" aria-selected="false">Live agent</button>
       <button role="tab" id="tab-replay" aria-controls="view-replay" aria-selected="false">Replay</button>
+      <button role="tab" id="tab-trace" aria-controls="view-trace" aria-selected="false">Trace</button>
     </nav>
   </div>
 </header>
@@ -142,6 +143,32 @@
         <button type="button" class="secondary" id="step-next" aria-label="Next checkpoint">Next</button>
       </div>
       <article class="checkpoint" id="replay-board" aria-live="polite"></article>
+    </div>
+  </section>
+
+  <!-- Trace -->
+  <section id="view-trace" role="tabpanel" aria-labelledby="tab-trace" class="view" hidden>
+    <div class="replay-bar">
+      <label class="field grow">
+        <span class="field-label">Traced session</span>
+        <select id="trace-select"></select>
+      </label>
+      <button type="button" class="secondary" id="trace-refresh">Refresh</button>
+    </div>
+    <div id="trace-empty" class="empty" hidden></div>
+    <div id="trace-body" hidden>
+      <ol class="step-pills run-pills" id="run-pills" aria-label="Agent runs in this session" hidden></ol>
+      <article class="checkpoint trace-summary" id="trace-summary" aria-live="polite"></article>
+      <div class="trace-cols">
+        <section aria-labelledby="trace-tl-h">
+          <h2 id="trace-tl-h">What the agent did</h2>
+          <ol class="timeline" id="trace-timeline"></ol>
+        </section>
+        <section aria-labelledby="trace-dec-h">
+          <h2 id="trace-dec-h">What it decided</h2>
+          <div id="trace-decisions" class="decisions"></div>
+        </section>
+      </div>
     </div>
   </section>
 </main>

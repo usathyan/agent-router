@@ -87,7 +87,12 @@ function toCheckpoint(src) {
     : Object.keys(probabilities);
   if (!optionIds.includes("none") && Object.keys(probabilities).length) optionIds.push("none");
   optionIds = [...optionIds.filter((i) => i !== "none"), ...(optionIds.includes("none") ? ["none"] : [])];
-  const thr = src.threshold ?? (src.thresholds && src.thresholds.threshold) ?? state.threshold;
+  // The bar the chosen entry was held to: per-entry thresholds differ from the router's.
+  // Records written before `applied_threshold` existed still name it in their reason.
+  const reasonThr = /threshold (\d*\.\d+)/.exec(d.reason || "");
+  const entryThr = d.entry_id && state.entries.get(d.entry_id) ? state.entries.get(d.entry_id).threshold : null;
+  const thr = d.applied_threshold ?? (reasonThr ? Number(reasonThr[1]) : null) ?? entryThr
+    ?? src.threshold ?? (src.thresholds && src.thresholds.threshold) ?? state.threshold;
   return {
     point: src.point || (src.event && src.event.point) || "prompt",
     tool: src.tool_name || null,
@@ -125,13 +130,22 @@ function verdict(cp) {
   const name = cp.entryId ? optionMeta(cp.entryId).name : null;
   const p = cp.entryId ? cp.probabilities[cp.entryId] : null;
   switch (t) {
-    case "suggest": return { title: `Points to ${name}`, pill: "Hint injected" };
-    case "enforce": return { title: `Blocks ${cp.tool || "the call"}, points to ${name}`, pill: "Call denied" };
-    case "gated": return { title: `Leans to ${name}, not enough`, pill: `${pct(p)} is under ${pct(cp.threshold)}` };
+    case "suggest": return { title: `Points to ${name}`, pill: `Hint injected: ${vsThreshold(p, cp.threshold)}` };
+    case "enforce": return { title: `Blocks ${cp.tool || "the call"}, points to ${name}`, pill: `Call denied: ${vsThreshold(p, cp.threshold)}` };
+    case "gated": return { title: `Leans to ${name}, not enough`, pill: vsThreshold(p, cp.threshold) };
     case "error": return { title: "Classifier failed, agent continues", pill: "Fail open" };
     case "skipped": return { title: skipTitle(cp.reason), pill: "Skipped" };
     default: return { title: "None fits, agent's own tools", pill: "Native path" };
   }
+}
+
+/** "69.6% is below the 80.0% threshold": which side of the bar the chosen option landed on. */
+function vsThreshold(p, thr) {
+  if (p == null || thr == null) return "";
+  const side = p > thr ? "above" : p < thr ? "below" : "at";
+  // one more decimal when rounding would print the same figure on both sides
+  const fmt = (x) => (side !== "at" && pct(p) === pct(thr) ? `${(x * 100).toFixed(2)}%` : pct(x));
+  return `${fmt(p)} is ${side} the ${fmt(thr)} threshold`;
 }
 
 function skipTitle(reason) {
@@ -164,7 +178,7 @@ function renderBars(cp, t, showThr = true) {
     bars.append(
       el("span"),
       el("div", { class: "thr-head", "aria-hidden": "true" },
-        el("span", { class: `thr-tag ${edge}`, style: `left:${thr * 100}%`, text: `threshold ${thr.toFixed(2)}` })),
+        el("span", { class: `thr-tag ${edge}`, style: `left:${thr * 100}%`, text: `threshold ${pct(thr)}` })),
       el("span"),
     );
   }
@@ -178,7 +192,7 @@ function renderBars(cp, t, showThr = true) {
     const row = el("div", {
       class: `bar-row${chosen ? ` chosen ${t}` : ""}${isNone ? " is-none" : ""}`,
       role: "listitem",
-      "aria-label": `${meta.name}: ${pct(p)}${chosen ? ", chosen" : ""}`,
+      "aria-label": `${meta.name}: ${pct(p)}${chosen ? ", chosen" : ""}${chosen && showThr && !isNone ? `, ${vsThreshold(p, thr).replace(/^\S+ is /, "")}` : ""}`,
     },
       el("div", { class: "bar-label", title: meta.what || "" },
         el("span", { class: "nm", text: isNone ? "none" : meta.name }),
@@ -238,7 +252,7 @@ function renderSees(cp, t) {
     if (cp.hintRestored) box.append(el("p", { class: "note", text: "The audit log keeps 300 characters; the rest is re-rendered from the same catalog template." }));
   } else {
     const why = t === "gated"
-      ? "Nothing. The top option is below the threshold, so the hook returns {} and the agent carries on unchanged."
+      ? `Nothing. ${cp.entryId ? optionMeta(cp.entryId).name : "The top option"} is at ${vsThreshold(cp.probabilities[cp.entryId], cp.threshold).replace(/ is /, ", ")}, so the hook returns {} and the agent carries on unchanged.`
       : t === "error"
         ? `Nothing. ${cp.reason || "The classifier raised"}; the router fails open.`
         : "Nothing. The hook returns {} and the agent carries on unchanged.";
@@ -508,7 +522,7 @@ async function startLive(e) {
       li = tlInsert(before, kind, "cp skipped", el("span", { class: "muted", text: `Skipped: ${why}.` }));
     } else {
       const card = el("article", { class: "checkpoint" });
-      const cp = renderCheckpoint(card, { ...d, threshold: state.threshold, mode }, { compact: true });
+      const cp = renderCheckpoint(card, { ...d, threshold: d.applied_threshold ?? state.threshold, mode }, { compact: true });
       const t = tone(cp);
       if (cp.hint) card.append(el("pre", { class: `hint-text ${t}`, text: cp.hint }));
       li = tlInsert(before, kind, `cp ${t}`, card);
@@ -596,7 +610,7 @@ async function loadSession(name) {
   pills.replaceChildren(...replay.records.map((r, i) => {
     const t = tone(toCheckpoint(r));
     const label = r.point === "prompt" ? "P" : r.point === "skill" ? "S" : "T";
-    return el("li", {}, el("button", { type: "button", class: t, title: `${r.point}${r.tool_name ? ` ${r.tool_name}` : ""}: ${r.action}`,
+    return el("li", {}, el("button", { type: "button", class: t, title: `${r.point}${r.tool_name ? ` ${r.tool_name}` : ""}${r.agent_type ? ` (inside ${r.agent_type})` : ""}: ${r.action}`,
       "aria-label": `Checkpoint ${i + 1}, ${r.point}, ${r.action}`, onclick: () => showStep(i) }, `${i + 1}${label}`));
   }));
   showStep(0);
@@ -610,6 +624,7 @@ function showStep(i) {
   renderCheckpoint($("#replay-board"), rec, { title: `Checkpoint ${replay.index + 1} of ${n}: ${POINT_LONG[rec.point] || rec.point}` });
   const board = $("#replay-board");
   if (rec.text) board.insertBefore(el("p", { class: "muted", text: `Prompt: ${rec.text}` }), board.children[1]);
+  board.insertBefore(el("p", { class: "muted", text: rec.agent_type ? `Called inside the ${rec.agent_type} agent` : "Called on the main thread" }), board.children[1]);
   $$("#step-pills button").forEach((b, j) => (j === replay.index ? b.setAttribute("aria-current", "step") : b.removeAttribute("aria-current")));
   $("#step-prev").disabled = replay.index === 0;
   $("#step-next").disabled = replay.index === n - 1;
@@ -632,9 +647,330 @@ function initReplay() {
   });
 }
 
+/* -- trace ------------------------------------------------------------------- */
+/* Decision traces from an integration's record-only hooks (integrations/first-principles/
+   trace.py): what the agent did, what it decided, and where the router's notes landed. */
+
+const trace = { data: null, runs: [], index: 0 };
+const BAND_TONE = { Rigorous: "suggest", Sound: "gated", "Hand-wavy": "enforce", Absent: "enforce" };
+const CONF_TONE = { HIGH: "suggest", MEDIUM: "gated", LOW: "enforce" };
+const VERDICT_TONE = { Accept: "native", Challenge: "gated", Discard: "enforce" };
+const REPORT_OP = { create: "Creates the report file", revise: "Revises the report in place", check: "Checks the report" };
+
+const chip = (text, tone = "native", title) => el("span", { class: `chip ${tone}`, title, text });
+const when = (ts) => Date.parse(ts);
+const clock = (s) => (s == null ? "" : `${Math.floor(s / 60)}:${String(Math.round(s % 60)).padStart(2, "0")}`);
+/** The calculator's result text, unwrapped from its JSON envelope when it has one. */
+function calcResult(text) {
+  try {
+    const v = JSON.parse(text);
+    if (v && typeof v === "object") return v.result ?? v.value ?? text;
+  } catch { /* plain text */ }
+  return text;
+}
+/** A multi-line command as one short line: `python3 -c "` alone says nothing. */
+const oneLine = (cmd, n = 90) => {
+  const flat = String(cmd || "").replace(/\s*\n\s*/g, " ⏎ ").trim();
+  return flat.length > n ? `${flat.slice(0, n - 1)}…` : flat;
+};
+const minutes = (s) => (s == null ? "–" : s >= 90 ? `${(s / 60).toFixed(1)} min` : `${Math.round(s)} s`);
+
+async function loadTraceSessions(select) {
+  let body = { sessions: [] };
+  try { body = await api("/api/trace/sessions"); } catch { /* shown as empty */ }
+  const sel = $("#trace-select");
+  sel.replaceChildren(...body.sessions.map((s) => el("option", { value: s.session },
+    `${s.session.slice(0, 8)}: ${s.finished} of ${s.runs} run${s.runs === 1 ? "" : "s"} finished${s.title ? `, “${s.title.slice(0, 70)}”` : ""}`)));
+  const none = body.sessions.length === 0;
+  $("#trace-empty").hidden = !none;
+  $("#trace-body").hidden = none;
+  if (none) {
+    $("#trace-empty").replaceChildren(
+      el("p", { text: "No decision traces yet." }),
+      el("p", { class: "small-print", text: `Looking in ${body.trace_dir || "the trace folder"}. The first-principles integration's hooks write one trace per session; trace.py --replay makes one from a saved run.` }));
+    return;
+  }
+  sel.value = select && body.sessions.some((s) => s.session === select) ? select : body.sessions[0].session;
+  await loadTrace(sel.value);
+}
+
+async function loadTrace(session) {
+  const data = await api(`/api/trace/${encodeURIComponent(session)}`);
+  trace.data = data;
+  const byRun = new Map();
+  let handoff = []; // the main session's Agent call(s) that start the next run
+  for (const r of data.records) {
+    if (r.kind === "delegation" && !r.agent_id) { handoff.push(r); continue; }
+    const key = r.agent_id || "run";
+    if (!byRun.has(key)) { byRun.set(key, handoff); handoff = []; }
+    byRun.get(key).push(r);
+  }
+  trace.runs = [...byRun.entries()].map(([id, recs]) => ({
+    id, recs, start: recs.find((r) => r.kind === "run_start"), end: recs.find((r) => r.kind === "run_end"),
+  }));
+  const pills = $("#run-pills");
+  pills.hidden = trace.runs.length < 2;
+  pills.replaceChildren(...trace.runs.map((r, i) => el("li", {}, el("button", {
+    type: "button", class: r.end ? "suggest" : "gated", onclick: () => showRun(i),
+    "aria-label": `Run ${i + 1}${r.end ? "" : ", not finished"}`,
+  }, `Run ${i + 1}`))));
+  showRun(0);
+}
+
+/** The router's notes that fired inside this run (or, for the prompt, just before it). */
+function routerMarks(run) {
+  const start = run.start ? when(run.start.ts) : -Infinity;
+  const end = run.end ? when(run.end.ts) : Infinity;
+  return (trace.data.audit || []).filter((a) => a.agent_type && ["suggest", "enforce"].includes(a.action)
+    && when(a.ts) >= start && when(a.ts) <= end);
+}
+
+function appliedThreshold(rec) {
+  if (rec.applied_threshold != null) return rec.applied_threshold;
+  const m = /threshold (\d*\.\d+)/.exec(rec.reason || "");
+  return m ? Number(m[1]) : null;
+}
+
+function fixRepeat(d) {
+  if (d.gate && d.gate.fix_repeat) return "yes";
+  const edge = d.re_entry || {};
+  if (edge.fired && /fix\/repeat/i.test(edge.disclosure || "")) return "yes (disclosed)";
+  return "no";
+}
+
+function showRun(i) {
+  trace.index = i;
+  const run = trace.runs[i];
+  $$("#run-pills button").forEach((b, j) => (j === i ? b.setAttribute("aria-current", "step") : b.removeAttribute("aria-current")));
+  renderTraceSummary(run);
+  renderTraceTimeline(run);
+  renderDecisions(run);
+}
+
+/** Calculator notes and calls, with what came before the note so it is not credited for it. */
+function calcSummary(rt) {
+  const plural = (n, w) => `${n ?? 0} ${w}${n === 1 ? "" : "s"}`;
+  const parts = [plural(rt.calc_notes, "note"), plural(rt.calc_calls, "call")];
+  if (rt.calc_calls_before_note != null) {
+    parts.push(`${rt.calc_calls_before_note} before the note, ${rt.calc_calls_after_note} after`);
+    if (rt.calc_loaded_before_first_note) parts.push("already loaded before the note");
+  } else if (rt.calc_note_followed != null) {
+    parts.push(rt.calc_note_followed ? "note followed" : "note not followed"); // older traces
+  }
+  if (rt.delegation_prompt_names_calc) parts.push("the delegating prompt named it");
+  if (rt.interpreter_calls_calc_could_run != null) {
+    parts.push(`${rt.interpreter_calls_calc_could_run} of ${plural(rt.interpreter_calls, "interpreter call")} it could run`);
+  }
+  return parts.join(", ");
+}
+
+function renderTraceSummary(run) {
+  const box = $("#trace-summary");
+  const end = run.end || {};
+  const d = end.decisions || {};
+  const rt = end.routing || {};
+  const concl = d.conclusion || {};
+  const conf = concl.confidence;
+  const head = el("div", { class: "verdict" },
+    el("h3", { text: run.end ? (concl.recommended || "Finished; no recommendation found in the report") : "Run not finished (no SubagentStop yet)" }),
+    conf ? el("span", { class: `pill ${CONF_TONE[conf] || "native"}`, text: `Confidence ${conf}` }) : null);
+  const deleg = rt.delegation || null;
+  const delegText = !deleg ? "–" : deleg.action === "suggest"
+    ? `note sent (${vsThreshold(deleg.p, deleg.applied_threshold)})` : `no note (p ${deleg.p == null ? "–" : pct(deleg.p)})`;
+  const gate = d.gate || {};
+  const bands = Object.entries(gate.bands || {});
+  const criteria = gate.criteria || {};
+  const gt = d.ground_truths || {};
+  const chains = d.chains || [];
+  const confCount = {};
+  chains.forEach((c) => { confCount[c.confidence || "?"] = (confCount[c.confidence || "?"] || 0) + 1; });
+  const stats = [
+    ["Duration", minutes(end.duration_s)],
+    ["Sections written", end.sections_written ?? run.recs.filter((r) => r.kind === "section_written").length],
+    ["Report restarts / revisions", `${end.report_restarts ?? 0} / ${end.report_revisions ?? 0}`],
+    ["References opened", el("span", { class: "chips" }, ...(end.references_read || run.recs.filter((r) => r.kind === "reference_read").map((r) => r.file))
+      .map((f) => chip(f.replace(/\.md$/, ""), "native")))],
+    ["Delegation", delegText],
+    ["Calculator", calcSummary(rt)],
+    ["Self-Audit Gate", bands.length ? el("span", { class: "chips" }, ...bands.map(([n, b]) =>
+      chip(`${n} ${b}`, BAND_TONE[b], criteria[n] ? `Criterion ${n}: ${criteria[n]}` : `Criterion ${n}`))) : "–"],
+    ["Fix/Repeat", run.end ? fixRepeat(d) : "–"],
+    ["Ground truths", gt.count == null ? "–" : `${gt.count}, ${(gt.unverified || []).length} not read at source`],
+    ["Chains", chains.length ? el("span", { class: "chips" }, chip(String(chains.length), "native"),
+      ...Object.entries(confCount).map(([c, n]) => chip(`${n} ${c}`, CONF_TONE[c]))) : "–"],
+    ["Failed calls", end.tool_failures ?? run.recs.filter((r) => r.kind === "tool_failed").length],
+    ["Source checks", end.sources ? `${end.sources.ok} ok, ${end.sources.reported_missing} without the content, ${end.sources.failed} failed${Object.keys(end.sources.failed_hosts || {}).length ? ` (${Object.keys(end.sources.failed_hosts).join(", ")})` : ""}` : "–"],
+  ];
+  const grid = el("div", { class: "stats" }, ...stats.map(([k, v]) => el("div", { class: "stat" },
+    el("span", { class: "stat-k", text: k }), el("span", { class: "stat-v" }, v))));
+  const foot = el("p", { class: "small-print" },
+    `Session ${trace.data.session}, agent ${String(run.id).slice(0, 12)}. `,
+    end.analysis ? el("code", { text: end.analysis }) : null);
+  const links = trace.data.audit && trace.data.audit.length
+    ? el("div", { class: "actions" }, el("button", { type: "button", class: "secondary",
+      onclick: () => openReplay(trace.data.session), text: `Step through the router's ${trace.data.audit.length} checkpoints` }))
+    : null;
+  box.replaceChildren(head, grid, foot, links);
+}
+
+/** A shell call that runs an interpreter (``math`` in traces before 2026-09-30). */
+const interp = (rec) => Boolean(rec.interpreter ?? rec.math);
+
+function traceItem(rec, t0) {
+  const dt = t0 == null ? 0 : (when(rec.ts) - t0) / 1000;
+  const at = t0 == null || rec.kind === "run_end" ? "" : dt < 0 ? " (before the run)" : ` +${clock(dt)}`;
+  const kind = (text, cls = "") => ({ kind: `${text}${at}`, cls });
+  let meta; let body;
+  switch (rec.kind) {
+    case "run_start":
+      meta = kind("Agent starts", "prompt");
+      body = el("span", { text: `first-principles run ${String(rec.agent_id || "").slice(0, 12)}` });
+      break;
+    case "reference_read":
+      meta = kind("Opens a reference");
+      body = el("span", {}, el("span", { class: "tool-name", text: rec.file }), ` ${rec.meaning}`);
+      break;
+    case "section_written":
+      meta = kind("Writes to the report", "write");
+      body = el("div", {},
+        el("ul", { class: "headings" }, ...(rec.headings || []).map((h) => el("li", { text: h }))),
+        rec.restarts ? chip("empties the report first", "enforce") : null,
+        rec.revises ? chip("also revises earlier text", "gated") : null,
+        (rec.headings || []).length ? null : el("span", { class: "muted", text: `${rec.chars} characters, no heading` }));
+      break;
+    case "report_op":
+      meta = kind(REPORT_OP[rec.op] || "Report file", rec.op === "revise" ? "write" : "");
+      body = el("details", {}, el("summary", { text: rec.op === "revise" ? "rewrites part of the report" : "command" }), el("pre", { text: rec.command }));
+      break;
+    case "calc":
+      meta = kind("Exact calculator", "calc");
+      body = el("code", { text: `${rec.expression} = ${calcResult(rec.result)}` });
+      break;
+    case "shell":
+      meta = kind(interp(rec) ? "Runs an interpreter" : "Shell command", interp(rec) ? "math" : "");
+      body = el("details", {}, el("summary", { text: oneLine(rec.command) }), el("pre", { text: rec.command }));
+      break;
+    case "delegation":
+      meta = kind("Main session delegates", "prompt");
+      body = el("span", { text: `prompt of ${rec.prompt_chars} characters${rec.prompt_names_calc ? ", tells the agent to use the calculator" : ""}` });
+      break;
+    case "source":
+      meta = kind(rec.tool === "WebSearch" ? "Searches for a source" : "Checks a source", rec.outcome === "ok" ? "" : "gated");
+      body = el("span", {}, el("code", { text: rec.host || rec.target || "" }),
+        rec.outcome === "reported_missing" ? chip("page did not have it", "gated") : null);
+      break;
+    case "tool_loaded":
+      meta = kind("Loads tools", rec.calc ? "calc" : "");
+      body = el("code", { text: rec.query });
+      break;
+    case "tool_failed":
+      meta = kind(`${rec.tool_name ? rec.tool_name.replace(/^mcp__.*__/, "") : "Call"} failed`, "err");
+      body = el("span", { text: rec.error || "" });
+      break;
+    case "run_end":
+      meta = kind(`Agent stops after ${minutes(rec.duration_s)}`, "answer");
+      body = el("details", {}, el("summary", { text: "its final message" }), el("pre", { text: rec.final_message || "" }));
+      break;
+    default:
+      meta = kind(rec.kind);
+      body = el("pre", { text: JSON.stringify(rec, null, 1) });
+  }
+  return el("li", { class: `tl ${meta.cls}` }, el("div", { class: "tl-kind", text: meta.kind }), el("div", { class: "tl-body" }, body));
+}
+
+function routerItem(rec, t0) {
+  const at = t0 == null ? "" : ` +${clock((when(rec.ts) - t0) / 1000)}`;
+  const name = rec.entry_id ? optionMeta(rec.entry_id).name : "an option";
+  const p = rec.entry_id ? (rec.probabilities || {})[rec.entry_id] : null;
+  return el("li", { class: `tl cp ${rec.action}` },
+    el("div", { class: "tl-kind", text: `Router ${rec.action === "enforce" ? "blocks" : "note"}${at}` }),
+    el("div", { class: "tl-body" }, `Points to ${name} on the next ${rec.tool_name || "call"}: `,
+      el("b", { text: vsThreshold(p, appliedThreshold(rec)) || rec.reason })));
+}
+
+/** Consecutive calculator calls (or plain shell calls) fold into one item. */
+function groupItem(recs, t0) {
+  const first = recs[0];
+  const at = t0 == null ? "" : ` +${clock((when(first.ts) - t0) / 1000)}`;
+  const calc = first.kind === "calc";
+  const label = calc ? `Exact calculator, ${recs.length} calls` : `${recs.length} shell commands`;
+  const lines = recs.map((r) => (calc ? `${r.expression} = ${calcResult(r.result)}` : oneLine(r.command)));
+  return el("li", { class: `tl ${calc ? "calc" : ""}` }, el("div", { class: "tl-kind", text: `${label}${at}` }),
+    el("div", { class: "tl-body" }, el("details", {}, el("summary", { text: lines[0].slice(0, 90) + (recs.length > 1 ? ` … and ${recs.length - 1} more` : "") }),
+      el("pre", { text: lines.join("\n") }))));
+}
+
+function renderTraceTimeline(run) {
+  const t0 = run.start ? when(run.start.ts) : null;
+  const foldable = (r) => r.kind === "calc" || (r.kind === "shell" && !interp(r));
+  const items = [];
+  for (const r of run.recs) {
+    const last = items[items.length - 1];
+    if (foldable(r) && last && last.group && last.group[0].kind === r.kind) last.group.push(r);
+    else items.push({ ts: when(r.ts), order: 1, group: foldable(r) ? [r] : null, rec: r });
+  }
+  const all = [
+    ...items.map((x) => ({ ...x, node: () => (x.group && x.group.length > 1 ? groupItem(x.group, t0) : traceItem(x.rec, t0)) })),
+    ...routerMarks(run).map((r) => ({ ts: when(r.ts), order: 0, node: () => routerItem(r, t0) })),
+  ].sort((a, b) => a.ts - b.ts || a.order - b.order);
+  $("#trace-timeline").replaceChildren(...all.map((x) => x.node()));
+}
+
+function section(title, open, ...kids) {
+  return el("details", { class: "decision", open }, el("summary", { text: title }), ...kids);
+}
+
+function renderDecisions(run) {
+  const box = $("#trace-decisions");
+  const d = (run.end || {}).decisions;
+  if (!d) {
+    box.replaceChildren(el("p", { class: "muted", text: run.end ? "The report file could not be read when the agent stopped." : "Decisions are read from the report when the agent stops." }));
+    return;
+  }
+  const out = [];
+  if (d.re_entry) out.push(el("p", { class: `re-entry ${d.re_entry.fired ? "fired" : ""}` },
+    chip(d.re_entry.fired ? "re-entry fired" : "no re-entry", d.re_entry.fired ? "gated" : "native"), ` ${d.re_entry.disclosure}`));
+  for (const c of d.contradictions || []) out.push(el("p", { class: "re-entry" }, chip("contradiction", "enforce"), ` ${c}`));
+  if (d.run_mode) out.push(el("p", { class: "re-entry" }, chip(`mode ${d.run_mode}`, "outline"), ` ${d.run_mode_line || ""}`));
+  const a = d.assumptions || { rows: [] };
+  out.push(section(`Assumptions (${a.count || 0})`, true,
+    el("p", { class: "chips" }, ...Object.entries(a.by_verdict || {}).map(([v, n]) => chip(`${n} ${v}`, VERDICT_TONE[v])),
+      ...Object.entries(a.by_type || {}).map(([t, n]) => chip(`${n} ${t}`, "outline"))),
+    el("table", { class: "dtable" },
+      el("thead", {}, el("tr", {}, el("th", { text: "Assumption" }), el("th", { text: "Type" }), el("th", { text: "Verdict" }))),
+      el("tbody", {}, ...(a.rows || []).map((r) => el("tr", {}, el("td", { text: r.assumption }), el("td", { text: r.type }),
+        el("td", {}, chip(r.verdict || "?", VERDICT_TONE[r.verdict]))))))));
+  const gt = d.ground_truths || {};
+  out.push(section(`Ground truths (${gt.count || 0}, ${(gt.unverified || []).length} not read at source)`, false,
+    (gt.unverified || []).length
+      ? el("p", { class: "chips" }, ...gt.unverified.map((g) => chip(g, "gated", "reported or unverified, not read at source")))
+      : el("p", { class: "muted", text: "Every ground truth was read at source." })));
+  out.push(section(`Derivation chains (${(d.chains || []).length})`, true,
+    el("ul", { class: "dlist" }, ...(d.chains || []).map((c) => el("li", {},
+      chip(c.confidence || "?", CONF_TONE[c.confidence]), " ", el("b", { text: c.id }), c.tag ? ` ${c.tag}` : "", `: ${c.title}`)))));
+  const gate = d.gate || {};
+  out.push(section(`Self-Audit Gate (${gate.passes || 0} scoring pass${gate.passes === 1 ? "" : "es"})`, true,
+    el("table", { class: "dtable" }, el("tbody", {}, ...Object.entries(gate.bands || {}).map(([n, b]) => el("tr", {},
+      el("td", { text: `${n}. ${(gate.criteria || {})[n] || "Criterion"}` }), el("td", {}, chip(b, BAND_TONE[b])))))),
+    gate.result ? el("p", { class: "small-print", text: gate.result }) : null));
+  out.push(section(`Dead ends (${(d.dead_ends || []).length})`, false,
+    el("ul", { class: "dlist" }, ...(d.dead_ends || []).map((x) => el("li", { text: x })))));
+  out.push(section(`Techniques not applied (${(d.techniques_not_applied || []).length})`, false,
+    el("ul", { class: "dlist" }, ...(d.techniques_not_applied || []).map((t) => el("li", {},
+      el("b", { text: t.technique }), ` (Phase ${t.phase}): ${t.reason}`)))));
+  out.push(section(`Report sections (${(d.sections || []).length})`, false,
+    el("ol", { class: "dlist" }, ...(d.sections || []).map((h) => el("li", { text: h })))));
+  box.replaceChildren(...out);
+}
+
+function initTrace() {
+  $("#trace-select").addEventListener("change", (e) => loadTrace(e.target.value));
+  $("#trace-refresh").addEventListener("click", () => loadTraceSessions($("#trace-select").value));
+}
+
 /* -- tabs & boot ---------------------------------------------------------------- */
 
-const TABS = { play: "Playground", live: "Live agent", replay: "Replay" };
+const TABS = { play: "Playground", live: "Live agent", replay: "Replay", trace: "Trace" };
 
 function selectTab(name) {
   for (const key of Object.keys(TABS)) {
@@ -644,6 +980,7 @@ function selectTab(name) {
   }
   if (location.hash !== `#${name}`) history.replaceState(null, "", `#${name}`);
   if (name === "replay" && !replay.records.length) loadSessions();
+  if (name === "trace" && !trace.data) loadTraceSessions();
 }
 
 async function boot() {
@@ -666,6 +1003,7 @@ async function boot() {
   initPlayground();
   initLive();
   initReplay();
+  initTrace();
   const hash = location.hash.slice(1);
   selectTab(TABS[hash] ? hash : "play");
 }

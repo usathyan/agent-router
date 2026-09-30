@@ -1,5 +1,6 @@
 import json
 import threading
+from dataclasses import replace
 
 import pytest
 
@@ -481,3 +482,57 @@ def test_local_decider_ignores_multiline_recent_through_the_router():
         )
     )
     assert ctx.result.probabilities == alone.result.probabilities
+
+
+# -- rule 3: fit checks ------------------------------------------------------
+
+FIT_CALC = replace(CALC, fits="calc_expression")
+SCRIPT = {"command": 'python3 -c "\nimport math\nx=2\nfor i in range(3): print(math.log(x+i))\n"'}
+ONE_LINER = {"command": 'python3 -c "print(0.17 * 2340)"'}
+
+
+def test_unfit_call_skips_before_the_decider():
+    decider = FakeDecider()
+    router = Router(Catalog("t", (FIT_CALC,)), decider, RouterConfig(), AuditLog(None))
+    d = router.route(ev(HookPoint.TOOL, tool_name="Bash", tool_input=SCRIPT))
+    assert (d.action, d.reason) == (Action.SKIPPED, "does not fit: exact-calc")
+    assert decider.calls == []
+
+
+def test_unfit_call_does_not_spend_the_turns_hint():
+    """A script the calculator cannot run must not use up the one hint per turn (RC12)."""
+    decider = FakeDecider(result("exact-calc", 0.95))
+    router = Router(Catalog("t", (FIT_CALC,)), decider, RouterConfig(), AuditLog(None))
+    assert router.route(ev(HookPoint.TOOL, tool_name="Bash", tool_input=SCRIPT)).action == (
+        Action.SKIPPED
+    )
+    d = router.route(ev(HookPoint.TOOL, tool_name="Bash", tool_input=ONE_LINER))
+    assert d.action == Action.SUGGEST and d.entry_id == "exact-calc"
+
+
+def test_fit_check_leaves_other_entries_eligible():
+    other = replace(CALC, id="other", target="mcp__agent_router__other")
+    decider = FakeDecider(result("other", 0.95))
+    router = Router(Catalog("t", (FIT_CALC, other)), decider, RouterConfig(), AuditLog(None))
+    d = router.route(ev(HookPoint.TOOL, tool_name="Bash", tool_input=SCRIPT))
+    assert d.entry_id == "other"
+    assert list(decider.calls[0][1]) == ["other", NONE_ID]
+
+
+def test_skip_prompt_skips_matching_prompts_only():
+    router, decider, _ = make(result("exact-calc"), skip_prompt=r"^\s*/first-principles:")
+    d = router.route(ev(text="/first-principles:first-principles-analysis is X true?"))
+    assert (d.action, d.reason) == (Action.SKIPPED, "skip pattern")
+    assert decider.calls == []
+    assert router.route(ev(text="is X true, from first principles?")).action == Action.SUGGEST
+
+
+def test_skip_prompt_does_not_apply_to_tool_calls():
+    router, _, _ = make(result("exact-calc"), skip_prompt=".*")
+    d = router.route(ev(HookPoint.TOOL, tool_name="Bash", tool_input={"command": "bc"}))
+    assert d.action == Action.SUGGEST
+
+
+def test_bad_skip_prompt_pattern_never_breaks_routing():
+    router, _, _ = make(result("exact-calc"), skip_prompt="(")
+    assert router.route(ev()).action == Action.SUGGEST

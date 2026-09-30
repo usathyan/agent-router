@@ -1,0 +1,10 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
+  "name": "agent-router-fp",
+  "displayName": "agent-router for first-principles",
+  "version": "0.1.0",
+  "description": "agent-router checkpoints for use next to the first-principles plugin: nudges the main session to delegate first-principles questions to the first-principles agent, and gives that agent an exact calculator for recomputing figures. Advisory only; fails open.",
+  "license": "MIT",
+  "homepage": "https://github.com/usathyan/agent-router",
+  "keywords": ["agent-router", "first-principles", "routing", "hooks"]
+}

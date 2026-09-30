@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# agent-router stdio MCP server for the first-principles integration: the exact calculator
+# only. Surfaces as mcp__plugin_agent-router-fp_agent_router__calc.
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+repo="$(dirname "$(dirname "$(dirname "$(dirname "$here")")")")"
+exec "${AGENT_ROUTER_BIN:-$repo/.venv/bin/agent-router}" mcp --tools calc

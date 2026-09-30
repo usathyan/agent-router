@@ -132,6 +132,8 @@ def _entry_json(e: CatalogEntry) -> dict[str, Any]:
         "replaces": list(e.replaces),
         "not_for": list(e.not_for),
         "examples": list(e.examples),
+        "agents": list(e.agents),
+        "threshold": e.threshold,
     }
 
 
@@ -205,10 +207,15 @@ def create_app(
     runner: Runner | None = None,
     catalog: Catalog | None = None,
     allow_shell: bool = False,
+    trace_dir: Path | None = None,
 ) -> FastAPI:
     """The demo app. ``runner`` defaults to ``agent_router.agent.run_agent`` (tests inject one);
-    ``allow_shell`` lets live runs use Bash/WebFetch without the SDK refusing them."""
+    ``allow_shell`` lets live runs use Bash/WebFetch without the SDK refusing them.
+    ``trace_dir`` holds decision traces (``<session>.jsonl``, written by an integration's
+    record-only hooks, e.g. integrations/first-principles/trace.py); it defaults to the
+    ``trace`` folder next to the audit folder, where those hooks put it."""
     audit_root = Path(audit_dir) if audit_dir is not None else DEFAULT_AUDIT_DIR
+    trace_root = Path(trace_dir) if trace_dir is not None else audit_root.parent / "trace"
     # With the default location, the committed sample session is offered for replay too.
     read_dirs = [audit_root] + ([SAMPLE_AUDIT_DIR] if audit_dir is None else [])
     cat = catalog if catalog is not None else load_catalog()
@@ -222,6 +229,17 @@ def create_app(
 
     app = FastAPI(title="agent-router demo")
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=list(ALLOWED_HOSTS))
+
+    @app.middleware("http")
+    async def revalidate_assets(request: Request, call_next: Callable[[Request], Awaitable[Any]]):
+        # Without Cache-Control a browser may reuse a cached app.js next to a newer index.html
+        # (heuristic freshness), and a tab the old script does not know silently does nothing.
+        # no-cache = ask every time; unchanged files still come back as 304 via their ETag.
+        response = await call_next(request)
+        if request.url.path == "/" or request.url.path.startswith("/static/"):
+            response.headers["Cache-Control"] = "no-cache"
+        return response
+
     app.state.run_slot = run_slot
 
     # -- helpers --------------------------------------------------------------
@@ -368,6 +386,7 @@ def create_app(
                 "action": str(decision.action),
                 "reason": _public_reason(decision.reason),
                 "entry_id": decision.entry_id,
+                "applied_threshold": decision.threshold,
             },
             "result": None
             if res is None
@@ -465,6 +484,61 @@ def create_app(
         path = find_session(session)
         return {"session": session, "records": [restore_hint(r) for r in _read_jsonl(path)]}
 
+    # -- decision traces (read-only) --------------------------------------------
+
+    def trace_path(name: str) -> Path:
+        if not _SESSION_RE.match(name):
+            raise HTTPException(400, "invalid session name")
+        path = trace_root / f"{name}.jsonl"
+        if not path.is_file():
+            raise HTTPException(404, f"no trace for session {name!r}")
+        return path
+
+    @app.get("/api/trace/sessions")
+    def get_trace_sessions() -> dict[str, Any]:
+        rows: list[dict[str, Any]] = []
+        if trace_root.is_dir():
+            for path in trace_root.glob("*.jsonl"):
+                if not _SESSION_RE.match(path.stem):
+                    continue
+                try:
+                    records = _read_jsonl(path)
+                except OSError:
+                    continue
+                title = next(
+                    (
+                        r["headings"][0]
+                        for r in records
+                        if r.get("kind") == "section_written" and r.get("headings")
+                    ),
+                    None,
+                )
+                rows.append(
+                    {
+                        "session": path.stem,
+                        "records": len(records),
+                        "runs": sum(r.get("kind") == "run_start" for r in records),
+                        "finished": sum(r.get("kind") == "run_end" for r in records),
+                        "title": title,
+                        "mtime": path.stat().st_mtime,
+                    }
+                )
+        rows.sort(key=lambda r: r["mtime"], reverse=True)
+        return {"sessions": rows, "trace_dir": str(trace_root)}
+
+    @app.get("/api/trace/{session}")
+    def get_trace(session: str) -> dict[str, Any]:
+        records = _read_jsonl(trace_path(session))
+        audit = next(
+            (d / f"{session}.jsonl" for d in read_dirs if (d / f"{session}.jsonl").is_file()), None
+        )
+        return {
+            "session": session,
+            "records": records,
+            # the router's own decisions in the same session, to interleave with the trace
+            "audit": [restore_hint(r) for r in _read_jsonl(audit)] if audit else [],
+        }
+
     @app.get("/")
     def index() -> FileResponse:
         return FileResponse(STATIC_DIR / "index.html")
@@ -555,13 +629,30 @@ async def _finish(task: asyncio.Task[None] | None, workspace: Path | None, sessi
         shutil.rmtree(workspace.parent, ignore_errors=True)
 
 
-def main(port: int = 8765, allow_shell: bool = False) -> None:
-    """Serve the demo on http://127.0.0.1:<port> (loopback only)."""
+def main(
+    port: int = 8765,
+    allow_shell: bool = False,
+    *,
+    catalog: Catalog | None = None,
+    audit_dir: Path | None = None,
+    trace_dir: Path | None = None,
+) -> None:
+    """Serve the demo on http://127.0.0.1:<port> (loopback only).
+
+    ``catalog`` / ``audit_dir`` point the demo at another catalog and another audit folder,
+    e.g. an integration's catalog and the audit logs its Claude Code hooks wrote.
+    """
     import uvicorn
 
     note = " (live runs may use Bash/WebFetch)" if allow_shell else ""
     print(f"agent-router demo: http://127.0.0.1:{port}{note}")
-    app = create_app(allow_shell=allow_shell)
+    if catalog is not None:
+        print(f"  catalog {catalog.version} ({len(catalog.entries)} entries)")
+    if audit_dir is not None:
+        print(f"  replaying audit logs from {audit_dir}")
+    if trace_dir is not None:
+        print(f"  decision traces from {trace_dir}")
+    app = create_app(audit_dir, allow_shell=allow_shell, catalog=catalog, trace_dir=trace_dir)
     uvicorn.run(app, host="127.0.0.1", port=port, log_level="warning")
 
 

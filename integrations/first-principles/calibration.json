@@ -1,0 +1,24 @@
+{
+  "model2vec": {
+    "alpha": 0.8,
+    "cal_accuracy": 0.8246,
+    "cal_false_positives": 1,
+    "cal_fpr": 0.0312,
+    "cal_misroute_rate": 0.0,
+    "catalog_version": "fp-2026-09-28.2",
+    "cv_accuracy": 0.807,
+    "cv_agreement": 0.6,
+    "cv_fpr": 0.0625,
+    "edge_params": [
+      "not_for_penalty"
+    ],
+    "embedder": "model2vec:minishlab/potion-base-8M",
+    "feasible": true,
+    "n_cases": 57,
+    "none_floor": 0.25,
+    "not_for_penalty": 32.0,
+    "saturated": 0.2632,
+    "temperature": 0.12,
+    "threshold": 0.65
+  }
+}

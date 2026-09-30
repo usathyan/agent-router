@@ -266,6 +266,67 @@ def test_audit_unknown_or_bad_session_404(client: TestClient, name: str) -> None
     assert client.get(f"/api/audit/{name}").status_code in (400, 404)
 
 
+def test_page_and_assets_are_always_revalidated(client: TestClient) -> None:
+    """A stale cached app.js next to a new index.html left the Trace tab dead on click."""
+    for path in ("/", "/static/app.js", "/static/app.css"):
+        res = client.get(path)
+        assert res.status_code == 200 and res.headers["cache-control"] == "no-cache"
+    etag = client.get("/static/app.js").headers["etag"]
+    assert client.get("/static/app.js", headers={"If-None-Match": etag}).status_code == 304
+    assert "cache-control" not in client.get("/api/catalog").headers
+
+
+# -- decision traces ----------------------------------------------------------------
+
+
+def _trace(kind: str, **kw) -> dict:
+    return {"ts": "2026-09-29T10:00:00+00:00", "session": "s1", "agent_id": "a1", "kind": kind} | kw
+
+
+def test_trace_sessions_default_to_the_folder_beside_the_audit_log(
+    client: TestClient, audit_dir: Path
+) -> None:
+    trace_dir = audit_dir.parent / "trace"
+    trace_dir.mkdir()
+    records = [
+        _trace("run_start"),
+        _trace("section_written", headings=["First-Principles Analysis — test", "1. X"]),
+        _trace("run_end", duration_s=12.5),
+    ]
+    _write_audit(trace_dir, "s1", records, junk=True)
+    _write_audit(trace_dir, "bad name", records)
+    body = client.get("/api/trace/sessions").json()
+    assert body["trace_dir"] == str(trace_dir)
+    (row,) = body["sessions"]
+    assert row["session"] == "s1" and row["records"] == 3
+    assert row["runs"] == 1 and row["finished"] == 1
+    assert row["title"] == "First-Principles Analysis — test"
+
+
+def test_trace_session_includes_the_routers_decisions(client: TestClient, audit_dir: Path) -> None:
+    trace_dir = audit_dir.parent / "trace"
+    trace_dir.mkdir()
+    _write_audit(trace_dir, "s1", [_trace("run_start"), _trace("run_end")])
+    _write_audit(audit_dir, "s1", [_rec(), _rec(turn=2)])
+    body = client.get("/api/trace/s1").json()
+    assert [r["kind"] for r in body["records"]] == ["run_start", "run_end"]
+    assert len(body["audit"]) == 2
+    _write_audit(trace_dir, "s2", [_trace("run_start")])
+    assert client.get("/api/trace/s2").json()["audit"] == []  # a trace without an audit log
+
+
+def test_trace_dir_can_be_set_and_missing_sessions_404(tmp_path: Path) -> None:
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    _write_audit(elsewhere, "t", [_trace("run_start")])
+    c = _client(server.create_app(audit_dir=tmp_path / "audit", trace_dir=elsewhere))
+    assert [r["session"] for r in c.get("/api/trace/sessions").json()["sessions"]] == ["t"]
+    assert c.get("/api/trace/nope").status_code == 404
+    assert c.get("/api/trace/..%2Fsecrets").status_code in (400, 404)
+    empty = _client(server.create_app(audit_dir=tmp_path / "audit", trace_dir=tmp_path / "none"))
+    assert empty.get("/api/trace/sessions").json()["sessions"] == []
+
+
 # -- live run (SSE, fake runner) ------------------------------------------------
 
 

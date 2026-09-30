@@ -60,6 +60,17 @@ Never forward `Decision.reason` to the model: it can hold exception text from a 
   context channel on `BeforeTool` (none is documented) and that `session_id` is stable
   across a session. **Not run** against a Gemini binary here.
 
+## Claude Code command hooks (implemented)
+
+`agent-router hook` is the command-hook adapter for Claude Code itself
+(`adapters/claude_code.py`): hook JSON on stdin, the same outputs as the SDK column above on
+stdout, always exit 0. Each hook call is a fresh process, so recent prompts and the
+once-per-turn hint set live in a per-session state file. `prompt_id` gives the turn, and
+`agent_type` (present on calls made inside a subagent) scopes entries with `agents:`.
+`agent-router mcp` serves the catalog tools over stdio for a plugin's `.mcp.json`. They
+surface as `mcp__plugin_<plugin>_agent_router__<tool>` and are deferred until loaded with
+ToolSearch. Worked example: `integrations/first-principles/`.
+
 ## stdin/stdout shim sketch (Codex / Gemini command hooks)
 
 ```python

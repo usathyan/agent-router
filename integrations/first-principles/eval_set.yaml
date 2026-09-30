@@ -1,0 +1,237 @@
+# Eval set for integrations/first-principles/catalog.yaml (same format as evals/eval_set.yaml).
+#
+# split cal:  written for this integration, independent of the catalog examples.
+# split test: the holdout. fp-P* / fp-N* are the 13 DELEGATE and 20 NO-DELEGATE prompts of
+#             first-principles-skill tests/routing-catalog.md (MIT, copied verbatim), the
+#             battery that plugin's own description-based routing is measured on.
+version: "fp-2026-09-28.2"
+
+cases:
+  # ------------------------------------------------------------ cal: prompt, delegate
+  - {id: c-p1, split: cal, point: prompt, expected: first-principles-agent,
+     text: "Everyone says microservices scale better. Work out from the fundamentals whether that's true for a team of six."}
+  - {id: c-p2, split: cal, point: prompt, expected: first-principles-agent,
+     text: "Are we sure a subscription model is right for our app, or did we just copy competitors? Dig into the assumptions."}
+  - {id: c-p3, split: cal, point: prompt, expected: first-principles-agent,
+     text: "Tear apart the reasoning that daylight saving time saves energy and tell me what actually holds up."}
+  - {id: c-p4, split: cal, point: prompt, expected: first-principles-agent,
+     text: "Starting from what we know for certain, is it cheaper to rent or buy a home over ten years?"}
+  - {id: c-p5, split: cal, point: prompt, expected: first-principles-agent,
+     text: "Why do airplanes cruise at around 35,000 feet? Build the answer up from the physics, not from convention."}
+  - {id: c-p6, split: cal, point: prompt, expected: first-principles-agent,
+     text: "Evaluate from ground zero whether our monorepo decision still makes sense."}
+  - {id: c-p7, split: cal, point: prompt, expected: first-principles-agent,
+     text: "I keep hearing that code review catches most bugs. Examine the hidden assumptions behind that belief."}
+  - {id: c-p8, split: cal, point: prompt, expected: first-principles-agent,
+     text: "Is a PhD worth it for a software engineer? Reason it through from basic truths, not anecdotes."}
+  - {id: c-p9, split: cal, point: prompt, expected: first-principles-agent,
+     text: "Critically examine whether open-plan offices really improve collaboration. What are the actual fundamentals?"}
+  - {id: c-p10, split: cal, point: prompt, expected: first-principles-agent,
+     text: "Decompose why hospitals have such long emergency room wait times into its root facts and reason up to fixes."}
+  # ------------------------------------------------------------ cal: prompt, none
+  - {id: c-n1, split: cal, point: prompt, expected: none,
+     text: "The login page throws a 500 error after the last deploy, help me find it."}
+  - {id: c-n2, split: cal, point: prompt, expected: none,
+     text: "Rename the fetchUser function to loadUser everywhere."}
+  - {id: c-n3, split: cal, point: prompt, expected: none,
+     text: "What does HTTP status 418 mean?"}
+  - {id: c-n4, split: cal, point: prompt, expected: none,
+     text: "Write a Python function that checks whether a string is a palindrome."}
+  - {id: c-n5, split: cal, point: prompt, expected: none,
+     text: "How do I configure a GitHub Actions workflow to run on pull requests?"}
+  - {id: c-n6, split: cal, point: prompt, expected: none,
+     text: "Give me a short summary of this README."}
+  - {id: c-n7, split: cal, point: prompt, expected: none, decoy: true,
+     text: "What assumptions does the default Django settings file make about the database?"}
+  - {id: c-n8, split: cal, point: prompt, expected: none, decoy: true,
+     text: "Why is my React component re-rendering twice? Walk me through the root cause."}
+  - {id: c-n9, split: cal, point: prompt, expected: none, decoy: true,
+     text: "What is the ideal gas law and what do the variables mean?"}
+  - {id: c-n10, split: cal, point: prompt, expected: none, decoy: true,
+     text: "Explain the Socratic method in two sentences."}
+  - {id: c-n11, split: cal, point: prompt, expected: none, decoy: true,
+     text: "What's the average interest rate on a 30-year mortgage right now?"}
+  - {id: c-n12, split: cal, point: prompt, expected: none,
+     text: "Profile this endpoint and tell me which query is the bottleneck."}
+  # ------------------------------------------------------------ cal: more prompts (both labels)
+  - {id: c-p11, split: cal, point: prompt, expected: first-principles-agent,
+     text: "Figure out from the bottom up why bridges are usually built with steel rather than aluminum."}
+  - {id: c-p12, split: cal, point: prompt, expected: first-principles-agent,
+     text: "Our team assumes weekly sprints are optimal. Pick that assumption apart and rebuild the cadence from what's actually true."}
+  - {id: c-p13, split: cal, point: prompt, expected: first-principles-agent,
+     text: "What basic facts explain why cities form near rivers, and does that still apply today?"}
+  - {id: c-p14, split: cal, point: prompt, expected: first-principles-agent,
+     text: "Stop reasoning by analogy and tell me whether a vegan diet is better for the planet, starting from verified facts."}
+  - {id: c-p15, split: cal, point: prompt, expected: first-principles-agent,
+     text: "Deconstruct the belief that unit tests make refactoring safe. Which parts are true and which are folklore?"}
+  - {id: c-p16, split: cal, point: prompt, expected: first-principles-agent,
+     text: "Why do batteries lose capacity in the cold? Derive it from the chemistry and tell me whether preheating really helps."}
+  - {id: c-p17, split: cal, point: prompt, expected: first-principles-agent,
+     text: "Is it actually true that bigger companies innovate less? Examine the premises before answering."}
+  - {id: c-p18, split: cal, point: prompt, expected: first-principles-agent,
+     text: "Rethink from the ground up why restaurants tip instead of charging a fixed service price."}
+  - {id: c-n13, split: cal, point: prompt, expected: none,
+     text: "Convert this JSON config to YAML."}
+  - {id: c-n14, split: cal, point: prompt, expected: none,
+     text: "Our Kafka consumer lag keeps climbing after the upgrade, what logs should I look at?"}
+  - {id: c-n15, split: cal, point: prompt, expected: none,
+     text: "Suggest better variable names for this loop."}
+  - {id: c-n16, split: cal, point: prompt, expected: none, decoy: true,
+     text: "What is the melting point of aluminum and how does it compare to steel?"}
+  - {id: c-n17, split: cal, point: prompt, expected: none, decoy: true,
+     text: "Define the term root cause analysis."}
+  - {id: c-n18, split: cal, point: prompt, expected: none, decoy: true,
+     text: "What are the stages of the scientific method?"}
+  - {id: c-n19, split: cal, point: prompt, expected: none,
+     text: "How do I enable HTTPS on my Flask development server?"}
+  - {id: c-n20, split: cal, point: prompt, expected: none, decoy: true,
+     text: "What is Occam's razor, briefly?"}
+  - {id: c-n21, split: cal, point: prompt, expected: none,
+     text: "Why is my CPU usage at 100% when the app is idle? Help me track it down."}
+  - {id: c-n22, split: cal, point: prompt, expected: none, decoy: true,
+     text: "Which vaccines are recommended for adults over 50?"}
+  # ------------------------------------------------------------ cal: Agent tool (main thread)
+  - {id: c-t1, split: cal, point: tool, expected: first-principles-agent,
+     text: "Question whether we need a message queue at all, from the fundamentals up.",
+     tool_name: Agent,
+     tool_input: {subagent_type: general-purpose, description: "Analyze queue need",
+                  prompt: "Challenge the assumptions behind adding a message queue and reason from fundamentals."}}
+  - {id: c-t2, split: cal, point: tool, expected: none,
+     text: "Where is the retry logic for payments implemented?",
+     tool_name: Agent,
+     tool_input: {subagent_type: Explore, description: "Find retry logic",
+                  prompt: "Search the codebase for the payment retry logic and report file paths."}}
+  - {id: c-t3, split: cal, point: tool, expected: none,
+     text: "Add input validation to the signup form.",
+     tool_name: Agent,
+     tool_input: {subagent_type: general-purpose, description: "Implement validation",
+                  prompt: "Add email and password validation to the signup form component."}}
+
+  # ------------------------------------------------------------ cal: Bash inside the first-principles agent
+  - {id: x-c1, split: cal, point: tool, expected: exact-calc, text: "", tool_name: Bash,
+     agent_type: "first-principles:first-principles", tool_input: {command: "python3 -c \"print(48 * 52 * 0.6)\""}}
+  - {id: x-c2, split: cal, point: tool, expected: exact-calc, text: "", tool_name: Bash,
+     agent_type: "first-principles:first-principles", tool_input: {command: "python3 -c \"print((1 + 0.07) ** 30)\""}}
+  - {id: x-c3, split: cal, point: tool, expected: exact-calc, text: "", tool_name: Bash,
+     agent_type: "first-principles:first-principles", tool_input: {command: "echo \"scale=8; 22/7 - 355/113\" | bc -l"}}
+  - {id: x-c4, split: cal, point: tool, expected: exact-calc, text: "", tool_name: Bash,
+     agent_type: "first-principles:first-principles", tool_input: {command: "python -c \"print(7.5e9 * 0.03 / 365)\""}}
+  - {id: x-c5, split: cal, point: tool, expected: exact-calc, text: "", tool_name: Bash,
+     agent_type: "first-principles:first-principles", tool_input: {command: "awk \"BEGIN { print 4200 / 1.2 / 8 }\""}}
+  - {id: x-c6, split: cal, point: tool, expected: exact-calc, text: "", tool_name: Bash,
+     agent_type: "first-principles:first-principles", tool_input: {command: "node -e \"console.log(2 ** 53 + 1)\""}}
+  - {id: x-n1, split: cal, point: tool, expected: none, text: "", tool_name: Bash,
+     agent_type: "first-principles:first-principles", tool_input: {command: "grep -rn \"retry\" src/"}}
+  - {id: x-n2, split: cal, point: tool, expected: none, text: "", tool_name: Bash,
+     agent_type: "first-principles:first-principles", tool_input: {command: "git log --oneline -10"}}
+  - {id: x-n3, split: cal, point: tool, expected: none, text: "", tool_name: Bash,
+     agent_type: "first-principles:first-principles", tool_input: {command: "python3 -m pytest -q tests/"}}
+  - {id: x-n4, split: cal, point: tool, expected: none, decoy: true, text: "", tool_name: Bash,
+     agent_type: "first-principles:first-principles", tool_input: {command: "wc -l README.md docs/*.md"}}
+  - {id: x-n5, split: cal, point: tool, expected: none, decoy: true, text: "", tool_name: Bash,
+     agent_type: "first-principles:first-principles", tool_input: {command: "python3 scripts/analyze_costs.py --year 2025"}}
+  - {id: x-n6, split: cal, point: tool, expected: none, text: "", tool_name: Bash,
+     agent_type: "first-principles:first-principles", tool_input: {command: "cat docs/architecture.md"}}
+  - {id: x-n7, split: cal, point: tool, expected: none, text: "", tool_name: Bash,
+     agent_type: "first-principles:first-principles", tool_input: {command: "pip install numpy"}}
+  - {id: x-n8, split: cal, point: tool, expected: none, decoy: true, text: "", tool_name: Bash,
+     agent_type: "first-principles:first-principles", tool_input: {command: "python3 -c \"import yaml; print(yaml.__version__)\""}}
+
+  # ------------------------------------------------------------ test: first-principles P rows
+  - {id: fp-P1, split: test, point: prompt, expected: first-principles-agent,
+     text: "Analyze from first principles why most New Year's resolutions fail by February. What are the fundamental drivers, not the surface symptoms?"}
+  - {id: fp-P2, split: test, point: prompt, expected: first-principles-agent,
+     text: "Challenge the assumptions behind the claim that working from home reduces productivity. Are they actually valid?"}
+  - {id: fp-P3, split: test, point: prompt, expected: first-principles-agent,
+     text: "Help me reason from ground truth about why a hot cup of coffee cools faster in its first ten minutes than in its second — what do we actually know is true?"}
+  - {id: fp-P4, split: test, point: prompt, expected: first-principles-agent,
+     text: "Decompose this problem into its foundations: why do most independent restaurants fail within the first year?"}
+  - {id: fp-P5, split: test, point: prompt, expected: first-principles-agent,
+     text: "Stress-test the reasoning behind the claim that raising the minimum wage always reduces total employment. Are there hidden assumptions?"}
+  - {id: fp-P6, split: test, point: prompt, expected: first-principles-agent,
+     text: "Question the design of standard 40-hour work weeks from first principles. Is the structure actually optimal, or just inherited?"}
+  - {id: fp-P7, split: test, point: prompt, expected: first-principles-agent,
+     text: "What are the fundamental ground truths about why human memory degrades over time? Reason up from them to evaluate whether spaced repetition really works."}
+  - {id: fp-P8, split: test, point: prompt, expected: first-principles-agent,
+     text: "Help me reason from the ground up about why the modern smartphone landed on this particular form factor — what do we actually know is true about why this shape and size won out?"}
+  - {id: fp-P9, split: test, point: prompt, expected: first-principles-agent,
+     text: "Help me reason from ground truth about why dissolving table salt in water lowers the freezing point — what do we actually know is true about the underlying mechanism?"}
+  - {id: fp-P10, split: test, point: prompt, expected: first-principles-agent,
+     text: "What are the fundamental ground truths about why the deep ocean stays cold even directly under the equator? Reason up from them to evaluate whether thermohaline circulation alone explains it."}
+  - {id: fp-P11, split: test, point: prompt, expected: first-principles-agent,
+     text: "I want to challenge the assumptions embedded in how modern universities assign academic credit hours — can you map out the distinct categories of assumptions baked into that model and evaluate whether each one actually holds?"}
+  - {id: fp-P12, split: test, point: prompt, expected: first-principles-agent,
+     text: "Help me analyze from first principles whether first-principles reasoning itself is a reliable method — what fundamental assumptions does the approach rest on, and do they actually hold under scrutiny?"}
+  - {id: fp-P13, split: test, point: prompt, expected: first-principles-agent,
+     text: "I want to reason from ground truth about why antibiotics stop working against bacteria that were once sensitive to them — what do we actually know is true about the underlying biological mechanism?"}
+  # ------------------------------------------------------------ test: first-principles N rows
+  - {id: fp-N1, split: test, point: prompt, expected: none,
+     text: "Review this PR for style issues and naming conventions."}
+  - {id: fp-N2, split: test, point: prompt, expected: none,
+     text: "Can you check this function for best practices and suggest improvements?"}
+  - {id: fp-N3, split: test, point: prompt, expected: none,
+     text: "Look over this TypeScript file and flag any issues you see."}
+  - {id: fp-N4, split: test, point: prompt, expected: none,
+     text: "Find the bug in this stack trace. The app crashes on startup."}
+  - {id: fp-N5, split: test, point: prompt, expected: none,
+     text: "My tests are failing. Can you help me figure out why this assertion is wrong?"}
+  - {id: fp-N6, split: test, point: prompt, expected: none,
+     text: "Why is this SQL query slow? Help me debug the performance issue."}
+  - {id: fp-N7, split: test, point: prompt, expected: none,
+     text: "Summarize this article about Kubernetes for me."}
+  - {id: fp-N8, split: test, point: prompt, expected: none,
+     text: "What's the difference between REST and GraphQL?"}
+  - {id: fp-N9, split: test, point: prompt, expected: none,
+     text: "Write a regex to match email addresses."}
+  - {id: fp-N10, split: test, point: prompt, expected: none,
+     text: "How do I configure nginx as a reverse proxy?"}
+  - {id: fp-N11, split: test, point: prompt, expected: none,
+     text: "Suggest how to refactor this function for readability."}
+  - {id: fp-N12, split: test, point: prompt, expected: none,
+     text: "Why doesn't this Python list comprehension compile?"}
+  - {id: fp-N13, split: test, point: prompt, expected: none,
+     text: "My Redis cache hit rate dropped from 95% to 60% — what should I check?"}
+  - {id: fp-N14, split: test, point: prompt, expected: none,
+     text: "How do I set up CORS in Express?"}
+  - {id: fp-N15, split: test, point: prompt, expected: none,
+     text: "What does the second argument to `Array.prototype.reduce` do?"}
+  - {id: fp-N16, split: test, point: prompt, expected: none, decoy: true,
+     text: "What's the formula for calculating the freezing-point depression of a 5% NaCl solution?"}
+  - {id: fp-N17, split: test, point: prompt, expected: none, decoy: true,
+     text: "How deep is the average ocean thermocline, and which latitudes have the steepest gradient?"}
+  - {id: fp-N18, split: test, point: prompt, expected: none, decoy: true,
+     text: "What are the main categories of cognitive biases that affect human decision-making?"}
+  - {id: fp-N19, split: test, point: prompt, expected: none, decoy: true,
+     text: "What is first-principles reasoning and how does it differ from analogical thinking?"}
+  - {id: fp-N20, split: test, point: prompt, expected: none, decoy: true,
+     text: "What antibiotic classes are typically used to treat MRSA infections?"}
+  # ------------------------------------------------------------ test: Agent tool (main thread)
+  - {id: t-t1, split: test, point: tool, expected: first-principles-agent,
+     text: "Is our decision to self-host Kafka actually sound? Rebuild the case from the basics.",
+     tool_name: Agent,
+     tool_input: {subagent_type: general-purpose, description: "Evaluate Kafka decision",
+                  prompt: "Evaluate whether self-hosting Kafka is justified; question each assumption from the ground up."}}
+  - {id: t-t2, split: test, point: tool, expected: none,
+     text: "Find all the places we call the old logging API.",
+     tool_name: Agent,
+     tool_input: {subagent_type: Explore, description: "Find logging calls",
+                  prompt: "Locate every call to the legacy logger module."}}
+  # ------------------------------------------------------------ test: Bash inside the first-principles agent
+  - {id: x-t1, split: test, point: tool, expected: exact-calc, text: "", tool_name: Bash,
+     agent_type: "first-principles:first-principles", tool_input: {command: "python3 -c \"print(0.35 * 18000 * 12)\""}}
+  - {id: x-t2, split: test, point: tool, expected: exact-calc, text: "", tool_name: Bash,
+     agent_type: "first-principles:first-principles", tool_input: {command: "echo \"2500*(1+0.042)^12\" | bc -l"}}
+  - {id: x-t3, split: test, point: tool, expected: exact-calc, text: "", tool_name: Bash,
+     agent_type: "first-principles:first-principles", tool_input: {command: "python3 -c \"import math; print(math.factorial(20) / math.factorial(17))\""}}
+  - {id: x-t4, split: test, point: tool, expected: exact-calc, text: "", tool_name: Bash,
+     agent_type: "first-principles:first-principles", tool_input: {command: "python3 -c \"print(1.6e-19 * 6.022e23)\""}}
+  - {id: x-t5, split: test, point: tool, expected: none, text: "", tool_name: Bash,
+     agent_type: "first-principles:first-principles", tool_input: {command: "ls -la"}}
+  - {id: x-t6, split: test, point: tool, expected: none, text: "", tool_name: Bash,
+     agent_type: "first-principles:first-principles", tool_input: {command: "find . -name \"*.py\" -newer setup.py"}}
+  - {id: x-t7, split: test, point: tool, expected: none, decoy: true, text: "", tool_name: Bash,
+     agent_type: "first-principles:first-principles", tool_input: {command: "python3 -c \"import json,sys; print(json.load(open('data.json'))['total'])\""}}
+  - {id: x-t8, split: test, point: tool, expected: none, text: "", tool_name: Bash,
+     agent_type: "first-principles:first-principles", tool_input: {command: "cat >> \".first-principles/analysis-20260928T120000Z.md\" <<'FP_EOF'\n## Derivation Chains\nC1: GT-1 (12 units) x GT-2 ($1,500) = $18,000\nFP_EOF"}}
+  - {id: x-t9, split: test, point: tool, expected: none, text: "", tool_name: Bash,
+     agent_type: "first-principles:first-principles", tool_input: {command: "grep -c '^#' \".first-principles/analysis-20260928T120000Z.md\""}}

@@ -130,7 +130,8 @@ Writes are locked and fail open.
 |---|---|---|
 | `ts` | ISO-8601 UTC | |
 | `session`, `turn` | str, int | the adapter bumps `turn` on each `UserPromptSubmit` |
-| `point`, `tool_name` | str, str or null | `prompt` / `tool` / `skill` |
+| `point`, `tool_name`, `agent_type` | str, str or null, str or null | `prompt` / `tool` / `skill`; `agent_type` is the host-reported subagent (null on the main thread) |
+| `tool_use_id`, `agent_id` | str or null | the host's ids for the pending call and for the subagent run making it; they join a decision to what the call did (the command itself is only hashed, in `state_sha256`) |
 | `state_sha256` | hex | hash of the full decider state (prompt, pending call, recent prompts) |
 | `text` | str | prompt text, first 300 characters |
 | `options` | list[str] | the offered ids, `none` last; empty when a gate stopped the call before the decider |
@@ -146,5 +147,9 @@ Writes are locked and fail open.
 - **Default location.** The demo writes to `.agent-router/audit/<session>.jsonl`. `agent-router run`
   and `route` write to `AGENT_ROUTER_AUDIT` if set, otherwise they keep records in memory.
 - **Replay** lists the demo's `.agent-router/audit/` sessions and the bundled `audit/sample-session.jsonl`.
+- **Trace** reads decision traces (`<session>.jsonl`) from `--trace-dir`, by default the `trace/`
+  folder next to the audit folder, where an integration's record-only hooks write them
+  (`integrations/first-principles/trace.py`). It interleaves the router's notes from the audit log
+  of the same session.
 - **Live agent timeline.** The adapter's `decision` event carries the same fields, minus `reason`.
   Its schema is in the `adapters/claude_sdk.py` docstring.

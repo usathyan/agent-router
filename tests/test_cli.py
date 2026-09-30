@@ -211,7 +211,13 @@ def test_demo_has_allow_shell_and_no_host(monkeypatch):
     seen = {}
     monkeypatch.setattr(server, "main", lambda **kw: seen.update(kw))
     assert cli.main(["demo", "--port", "8799"]) == 0
-    assert seen == {"port": 8799, "allow_shell": False}
+    assert seen == {
+        "port": 8799,
+        "allow_shell": False,
+        "catalog": None,
+        "audit_dir": None,
+        "trace_dir": None,
+    }
     assert cli.main(["demo", "--allow-shell"]) == 0
     assert seen["allow_shell"] is True
     with pytest.raises(SystemExit):
@@ -326,3 +332,18 @@ def test_eval_scores_explicitly_and_ignores_router_env(capsys, monkeypatch):
     out = json.loads(capsys.readouterr().out)
     assert out["threshold"] != 0.99
     assert all(c["reason"] != "disabled" for c in out["cases"])
+
+
+def test_demo_catalog_and_audit_dir(monkeypatch, tmp_path):
+    import agent_router.demo.server as server
+
+    path = tmp_path / "c.yaml"
+    path.write_text(
+        "version: v9\nentries:\n  - {id: a, kind: agent, name: n, project: p, license: MIT,"
+        " url: u, what: w, target: t, points: [prompt], agents: [main]}\n"
+    )
+    seen = {}
+    monkeypatch.setattr(server, "main", lambda **kw: seen.update(kw))
+    argv = ["demo", "--catalog", str(path), "--audit-dir", str(tmp_path)]
+    assert cli.main(argv) == 0
+    assert seen["catalog"].version == "v9" and seen["audit_dir"] == tmp_path

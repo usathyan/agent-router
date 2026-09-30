@@ -57,6 +57,20 @@ def test_calc_irrational_sqrt_is_approximate():
     assert calc.evaluate("sqrt(2)") == "≈ 1.4142135624"
 
 
+@pytest.mark.parametrize(
+    ("expr", "expected"),
+    [
+        # batches the agent sent in the first-principles runs, which failed before
+        ("[1532/4, 1646/4]", "[383, 823/2 (≈ 411.5)]"),
+        ("(3*48*1, 3*48*2)", "[144, 288]"),
+        ("[5,100]", "[5, 100]"),  # in a list, commas separate items
+        ("[sqrt(2), 2]", "[≈ 1.4142135624, 2]"),
+    ],
+)
+def test_calc_evaluates_each_item_of_a_list(expr, expected):
+    assert calc.evaluate(expr) == expected
+
+
 def test_calc_compound_interest():
     out = calc.evaluate("10000 * (1 + 5/100)**7")
     assert out.endswith("(≈ 14071.0042265625)")
@@ -84,6 +98,13 @@ def test_calc_compound_interest():
         "sqrt(-1)",
         "(-8)**(1/3)",
         "gcd(1/2, 3)",
+        "[]",
+        "()",
+        "[1, [2]]",
+        "[1] * 3",
+        "[__import__('os')]",
+        "[1/0, 2]",
+        "[" + ", ".join(["1"] * 51) + "]",
     ],
 )
 def test_calc_rejects(expr):

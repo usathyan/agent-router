@@ -24,7 +24,7 @@ Listeners registered with ``on_decision`` (and the ``on_event`` callback of
                      {"point": "prompt"|"tool"|"skill", "tool_name": str|None,
                       "session_id": str, "turn_id": int, "action":
                       "suggest"|"enforce"|"native"|"skipped", "entry_id": str|None,
-                      "hint": str|None, "choice": str|None,
+                      "applied_threshold": float|None, "hint": str|None, "choice": str|None,
                       "probabilities": {option_id: float}, "confidence": float|None,
                       "backend": str|None, "latency_ms": float|None,
                       "stages": [stage, ...]}
@@ -97,6 +97,7 @@ def decision_payload(event: RouterEvent, decision: Decision) -> dict[str, Any]:
         "turn_id": event.turn_id,
         "action": str(decision.action),
         "entry_id": decision.entry_id,
+        "applied_threshold": decision.threshold,
         "hint": decision.hint,
         "choice": res.choice if res else None,
         "probabilities": {k: float(v) for k, v in res.probabilities.items()} if res else {},
@@ -172,6 +173,7 @@ class ClaudeRouterHooks:
                 tool_name=tool_name,
                 tool_input=tool_in,
                 recent=tuple(prior)[:-1],  # the last prompt is already ``text``
+                tool_use_id=tool_use_id,
             )
             return await self._route(event, "PreToolUse")
         except Exception:

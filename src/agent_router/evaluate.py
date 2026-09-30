@@ -77,6 +77,7 @@ class EvalCase:
     split: str = "test"
     decoy: bool = False
     recent: tuple[str, ...] = ()  # earlier prompts of the session (multi-turn context)
+    agent_type: str | None = None  # the subagent making the call (None: main thread)
 
     def event(self, turn_id: int, session_id: str = "eval") -> RouterEvent:
         return RouterEvent(
@@ -87,6 +88,7 @@ class EvalCase:
             tool_name=self.tool_name,
             tool_input=self.tool_input,
             recent=self.recent,
+            agent_type=self.agent_type,
         )
 
 
@@ -107,6 +109,7 @@ def load_cases(path: str | Path = DEFAULT_EVAL_SET, split: str | None = None) ->
             split=str(raw.get("split", "test")),
             decoy=bool(raw.get("decoy", False)),
             recent=tuple(str(r) for r in raw.get("recent") or ()),
+            agent_type=raw.get("agent_type"),
         )
         if case.split not in SPLITS:
             raise ValueError(f"case {case.id}: split must be cal or test")

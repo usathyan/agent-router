@@ -3,7 +3,8 @@
 Never calls ``eval``/``exec``. Supports int/decimal literals (as exact Fractions),
 ``+ - * / // % **``, unary +/-, parentheses, postfix percent (``17% of 2340``, ``50%``) and
 the functions in ``FUNCTIONS``. Irrational results (``sqrt(2)``, fractional powers) are
-reported as ``≈ decimal``. All failures raise ``ValueError``.
+reported as ``≈ decimal``. A top-level list or tuple (``[2*3, 7/2]``) evaluates each item and
+returns ``[6, 7/2 (≈ 3.5)]``. All failures raise ``ValueError``.
 """
 
 import ast
@@ -23,6 +24,7 @@ MAX_RESULT_BITS = 32_000
 MAX_INT_ARG = 1_000
 MAX_EXPRESSION_CHARS = 1_000
 MAX_DEPTH = 100
+MAX_ITEMS = 50  # a top-level list: agents batch a table's rows (6 of ~600 calls in the fp runs)
 DECIMAL_PLACES = 10
 _APPROX_DIGITS = 50
 
@@ -225,7 +227,7 @@ def _eval(node: ast.AST, state: _Inexact, depth: int = 0) -> Fraction:
 
 def _preprocess(expression: str) -> str:
     expr = expression.strip()
-    if not _CALL.search(expr):
+    if not _CALL.search(expr) and not expr.startswith("["):  # in a list, "5,100" is two items
         # "2,340" is a thousands separator only when no function call could use commas.
         expr = _THOUSANDS.sub(lambda m: m.group(0).replace(",", ""), expr)
     m = _PERCENT_OF.search(expr)
@@ -277,6 +279,17 @@ def evaluate(expression: str) -> str:
         raise ValueError(f"invalid expression: {e.msg}") from e
     except (RecursionError, MemoryError) as e:
         raise ValueError("expression nested too deeply") from e
+    items = tree.body.elts if isinstance(tree.body, ast.List | ast.Tuple) else None
+    if items is not None:
+        if not items:
+            raise ValueError("empty list")
+        if len(items) > MAX_ITEMS:
+            raise ValueError(f"too many items (limit {MAX_ITEMS})")
+        return "[" + ", ".join(_one(ast.Expression(body=node)) for node in items) + "]"
+    return _one(tree)
+
+
+def _one(tree: ast.Expression) -> str:
     state = _Inexact()
     try:
         return format_result(_eval(tree, state), state.flag)

@@ -1,0 +1,7 @@
+{
+  "mcpServers": {
+    "agent_router": {
+      "command": "${CLAUDE_PLUGIN_ROOT}/bin/mcp"
+    }
+  }
+}

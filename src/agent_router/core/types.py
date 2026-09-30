@@ -71,6 +71,12 @@ class RouterEvent:
     tool_name: str | None = None
     tool_input: dict[str, Any] | None = None
     recent: tuple[str, ...] = ()
+    agent_type: str | None = None
+    """The subagent making the call (host-reported), or None on the main thread."""
+    tool_use_id: str | None = None
+    """The host's id for the pending call: joins a decision to what the call did."""
+    agent_id: str | None = None
+    """The host's id for the subagent run making the call (None on the main thread)."""
 
 
 @dataclass(frozen=True)
@@ -81,6 +87,8 @@ class Decision:
     hint: str | None = None
     result: ChoiceResult | None = None
     options: tuple[str, ...] = field(default_factory=tuple)
+    threshold: float | None = None
+    """The bar the chosen entry was held to (its own, else the router's); None when none chosen."""
 
 
 PRIVATE_STAGE_KEYS = frozenset({"error"})

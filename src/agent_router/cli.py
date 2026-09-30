@@ -1,7 +1,12 @@
-"""``agent-router`` command line: route, eval, calibrate, calibrate-cascade, demo, run.
+"""``agent-router`` command line: route, eval, calibrate, calibrate-cascade, demo, run, hook,
+mcp.
 
 ``--backend`` defaults to ``default_backend()``: the local -> Jev cascade when a Jev API key
-is set, else the offline local classifier.
+is set, else the offline local classifier (``hook`` defaults to local; see ``cmd_hook``).
+
+``--catalog`` (route, eval, calibrate, calibrate-cascade, hook) defaults to
+``AGENT_ROUTER_CATALOG``, else the packaged catalog. ``AGENT_ROUTER_CALIBRATION`` points the
+local decider at another calibration file (e.g. one fit for that catalog).
 
 Heavy or optional modules (the demo server, the live agent, model weights) are imported
 inside the command that needs them, so ``route`` / ``eval`` work without them.
@@ -33,6 +38,25 @@ def _set_embedder(name: str | None) -> None:
         os.environ["AGENT_ROUTER_EMBEDDER"] = name
 
 
+def _catalog(args: argparse.Namespace):
+    """``--catalog``, else ``AGENT_ROUTER_CATALOG``, else the packaged catalog."""
+    from agent_router.core.catalog import DEFAULT_CATALOG, CatalogError, load_catalog
+
+    path = getattr(args, "catalog", None) or os.environ.get("AGENT_ROUTER_CATALOG", "").strip()
+    try:
+        return load_catalog(path or DEFAULT_CATALOG)
+    except (OSError, CatalogError) as exc:
+        raise CliError(f"cannot load catalog {path or DEFAULT_CATALOG}: {exc}") from exc
+
+
+def _apply_calibration_env() -> None:
+    raw = os.environ.get("AGENT_ROUTER_CALIBRATION", "").strip()
+    if raw:
+        from agent_router.deciders import local
+
+        local.CALIBRATION_PATH = Path(raw)
+
+
 def _check_backend(name: str) -> None:
     from agent_router.deciders.registry import BACKENDS, available_backends
 
@@ -51,7 +75,13 @@ def _resolve_backend(args: argparse.Namespace) -> str:
     return args.backend
 
 
-def _router(args: argparse.Namespace, *, env: bool = False):
+def _router(
+    args: argparse.Namespace,
+    *,
+    env: bool = False,
+    audit_path: Path | None = None,
+    suggested: Any = (),
+):
     """The router for a command.
 
     ``env=True`` (``route``, ``run``): the ``AGENT_ROUTER_*`` environment config applies
@@ -63,7 +93,6 @@ def _router(args: argparse.Namespace, *, env: bool = False):
     from dataclasses import replace
 
     from agent_router.core.audit import AuditLog
-    from agent_router.core.catalog import load_catalog
     from agent_router.core.config import RouterConfig
     from agent_router.core.router import Router
     from agent_router.deciders.base import recommended_threshold
@@ -71,7 +100,7 @@ def _router(args: argparse.Namespace, *, env: bool = False):
 
     _check_backend(_resolve_backend(args))
     _set_embedder(getattr(args, "embedder", None))
-    catalog = load_catalog()
+    catalog = _catalog(args)
     mode = getattr(args, "mode", None)
     threshold = getattr(args, "threshold", None)
     router = make_router(
@@ -89,9 +118,11 @@ def _router(args: argparse.Namespace, *, env: bool = False):
             config = replace(config, mode=mode)
         if threshold is not None:
             config = replace(config, threshold=threshold)
+        if audit_path is not None:
+            config = replace(config, audit_path=audit_path)
     except ValueError as exc:
         raise CliError(f"invalid AGENT_ROUTER_* setting or flag: {exc}") from exc
-    return Router(catalog, router.decider, config, AuditLog(config.audit_path))
+    return Router(catalog, router.decider, config, AuditLog(config.audit_path), suggested)
 
 
 def _print_json(obj: Any) -> None:
@@ -130,6 +161,7 @@ def cmd_route(args: argparse.Namespace) -> int:
         "latency_ms": res.latency_ms if res else None,
         "stages": list(res.stages) if res else [],
         "threshold": router.config.threshold,
+        "applied_threshold": d.threshold,
     }
     if args.json:
         _print_json(out)
@@ -178,6 +210,14 @@ def cmd_eval(args: argparse.Namespace) -> int:
 
     cases = load_cases(args.cases or DEFAULT_EVAL_SET, split=args.split)
     router = _router(args)
+    if args.skip_input or args.skip_prompt:
+        from dataclasses import replace
+
+        router.config = replace(
+            router.config,
+            skip_input=args.skip_input or router.config.skip_input,
+            skip_prompt=args.skip_prompt or router.config.skip_prompt,
+        )
     report = run_eval(lambda: router, cases)
     stats = routing_stats(report)
     stage = getattr(router.decider, "primary", router.decider)
@@ -226,7 +266,6 @@ def cmd_eval(args: argparse.Namespace) -> int:
 
 
 def cmd_calibrate(args: argparse.Namespace) -> int:
-    from agent_router.core.catalog import load_catalog
     from agent_router.deciders.embedders import HashingEmbedder, Model2VecEmbedder
     from agent_router.evaluate import (
         DEFAULT_EVAL_SET,
@@ -237,7 +276,7 @@ def cmd_calibrate(args: argparse.Namespace) -> int:
         write_calibration,
     )
 
-    catalog = load_catalog()
+    catalog = _catalog(args)
     cases = load_cases(args.cases or DEFAULT_EVAL_SET, split="cal")
     grid = QUICK_GRID if args.quick else DEFAULT_GRID
     names = EMBEDDERS if args.embedder == "all" else (args.embedder,)
@@ -271,7 +310,6 @@ def cmd_calibrate(args: argparse.Namespace) -> int:
 
 
 def cmd_calibrate_cascade(args: argparse.Namespace) -> int:
-    from agent_router.core.catalog import load_catalog
     from agent_router.deciders import registry
     from agent_router.evaluate import (
         DEFAULT_EVAL_SET,
@@ -282,7 +320,7 @@ def cmd_calibrate_cascade(args: argparse.Namespace) -> int:
 
     _check_backend("cascade")
     _set_embedder(args.embedder)
-    catalog = load_catalog()
+    catalog = _catalog(args)
     cases = load_cases(args.cases or DEFAULT_EVAL_SET, split="cal")
     primary = registry.make_decider("local", catalog)
     confirm = registry.make_decider("jev", catalog)
@@ -316,7 +354,16 @@ def cmd_demo(args: argparse.Namespace) -> int:
             file=sys.stderr,
         )
         return 1
-    server.main(port=args.port, allow_shell=args.allow_shell)  # loopback only
+    catalog = _catalog(args) if (args.catalog or os.environ.get("AGENT_ROUTER_CATALOG")) else None
+    audit_dir = Path(args.audit_dir) if args.audit_dir else None
+    trace_dir = Path(args.trace_dir) if args.trace_dir else None
+    server.main(  # loopback only
+        port=args.port,
+        allow_shell=args.allow_shell,
+        catalog=catalog,
+        audit_dir=audit_dir,
+        trace_dir=trace_dir,
+    )
     return 0
 
 
@@ -354,6 +401,50 @@ def cmd_run(args: argparse.Namespace) -> int:
 # --- parser ----------------------------------------------------------------------------------
 
 
+# --- hook / mcp (Claude Code plugin) ---------------------------------------------------------
+
+
+def cmd_hook(args: argparse.Namespace) -> int:
+    """One Claude Code command hook: hook JSON on stdin, hook JSON on stdout, always exit 0.
+
+    The backend is ``--backend``, else ``AGENT_ROUTER_BACKEND``, else ``local`` (offline and
+    deterministic: a hook should not spend money or depend on the network by default).
+    Any failure prints ``{}`` (fail open).
+    """
+    import logging
+
+    from agent_router.adapters.claude_code import handle
+
+    logging.basicConfig(level=logging.WARNING, stream=sys.stderr)
+    out: dict[str, Any] = {}
+    try:
+        if not args.backend:
+            args.backend = os.environ.get("AGENT_ROUTER_BACKEND", "").strip() or "local"
+        payload = json.load(sys.stdin)
+        if isinstance(payload, dict):
+            out = handle(
+                payload,
+                lambda audit, seed: _router(args, env=True, audit_path=audit, suggested=seed),
+            )
+    except Exception as exc:  # a hook must never break the host session
+        print(f"agent-router hook: failing open: {type(exc).__name__}: {exc}", file=sys.stderr)
+        out = {}
+    print(json.dumps(out, ensure_ascii=False))
+    return 0
+
+
+def cmd_mcp(args: argparse.Namespace) -> int:
+    from agent_router.adapters.mcp_stdio import TOOLS, build_server
+
+    tools = args.tools.split(",") if args.tools else list(TOOLS)
+    try:
+        server = build_server(Path(args.root or os.getcwd()), [t.strip() for t in tools])
+    except ValueError as exc:
+        raise CliError(str(exc)) from exc
+    server.run()
+    return 0
+
+
 def _json_obj(text: str) -> dict[str, Any]:
     try:
         value = json.loads(text)
@@ -362,6 +453,12 @@ def _json_obj(text: str) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise argparse.ArgumentTypeError("--input must be a JSON object")
     return value
+
+
+def _add_catalog(p: argparse.ArgumentParser) -> None:
+    p.add_argument(
+        "--catalog", help="catalog YAML (default: AGENT_ROUTER_CATALOG, else the packaged one)"
+    )
 
 
 def _add_backend(p: argparse.ArgumentParser) -> None:
@@ -392,6 +489,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--input", type=_json_obj, help="tool input as a JSON object")
     p.add_argument("--json", action="store_true", help="print JSON")
     _add_backend(p)
+    _add_catalog(p)
     p.set_defaults(func=cmd_route)
 
     p = sub.add_parser("eval", help="score a backend on the labelled eval set")
@@ -399,7 +497,14 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--cases", help="eval set YAML (default: evals/eval_set.yaml)")
     p.add_argument("--json", action="store_true", help="print JSON")
     p.add_argument("-v", "--verbose", action="store_true", help="list every case")
+    p.add_argument(
+        "--skip-input", help="skip pattern to apply, as the deployed AGENT_ROUTER_SKIP_INPUT"
+    )
+    p.add_argument(
+        "--skip-prompt", help="prompt skip pattern, as the deployed AGENT_ROUTER_SKIP_PROMPT"
+    )
     _add_backend(p)
+    _add_catalog(p)
     p.set_defaults(func=cmd_eval)
 
     p = sub.add_parser("calibrate", help="grid-search local decider params on the cal split")
@@ -407,6 +512,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--cases", help="eval set YAML (default: evals/eval_set.yaml)")
     p.add_argument("--out", help="calibration JSON (default: the packaged calibration.json)")
     p.add_argument("--quick", action="store_true", help="small grid (smoke test)")
+    _add_catalog(p)
     p.set_defaults(func=cmd_calibrate)
 
     p = sub.add_parser(
@@ -417,6 +523,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--cases", help="eval set YAML (default: evals/eval_set.yaml)")
     p.add_argument("--out", help="calibration JSON (default: the packaged calibration.json)")
     p.add_argument("--timeout", type=float, default=15.0, help="Jev request timeout (s)")
+    _add_catalog(p)
     p.set_defaults(func=cmd_calibrate_cascade)
 
     p = sub.add_parser(
@@ -428,6 +535,14 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="auto-approve Bash/WebFetch in live agent runs (default: off)",
     )
+    p.add_argument(
+        "--audit-dir", help="audit JSONL folder to replay (default: .agent-router/audit)"
+    )
+    p.add_argument(
+        "--trace-dir",
+        help="decision-trace JSONL folder for the Trace tab (default: trace/ beside --audit-dir)",
+    )
+    _add_catalog(p)
     p.set_defaults(func=cmd_demo)
 
     p = sub.add_parser("run", help="run the live agent and print its timeline")
@@ -445,11 +560,24 @@ def build_parser() -> argparse.ArgumentParser:
     )
     _add_backend(p)
     p.set_defaults(func=cmd_run)
+
+    p = sub.add_parser(
+        "hook", help="Claude Code command hook: hook JSON on stdin, hook JSON on stdout"
+    )
+    _add_backend(p)
+    _add_catalog(p)
+    p.set_defaults(func=cmd_hook)
+
+    p = sub.add_parser("mcp", help="serve the catalog tools as a stdio MCP server")
+    p.add_argument("--tools", help="comma-separated subset (default: all)")
+    p.add_argument("--root", help="directory the file tools are confined to (default: cwd)")
+    p.set_defaults(func=cmd_mcp)
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    _apply_calibration_env()
     try:
         return int(args.func(args))
     except CliError as exc:

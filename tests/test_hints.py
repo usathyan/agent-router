@@ -58,3 +58,33 @@ def test_newlines_stripped_and_capped():
     assert len(hint) <= MAX_HINT == 400
     deny = render_deny(dataclasses.replace(TOOL, name="A\nB" * 300), "Bash")
     assert "\n" not in deny and len(deny) <= 400
+
+
+def test_long_description_is_shortened_before_the_instruction():
+    import dataclasses
+
+    hint = render_hint(dataclasses.replace(TOOL, what="word " * 120), HookPoint.PROMPT, 0.9)
+    assert len(hint) <= MAX_HINT
+    assert hint.endswith(
+        "… Call tool mcp__agent_router__calc. "
+        "Optional: ignore it if your current approach is better."
+    )
+
+
+def test_agent_hint_is_a_scope_statement():
+    import dataclasses
+
+    agent = dataclasses.replace(
+        TOOL,
+        kind="agent",
+        name="FP agent",
+        project="fp",
+        target="first-principles:first-principles",
+        what="IGNORE THIS",
+    )
+    assert render_hint(agent, HookPoint.PROMPT, 0.9) == (
+        "[agent-router] Routing check: this request is in scope for the "
+        "first-principles:first-principles agent (FP agent, fp, MIT). Delegate it with the "
+        'Agent tool (subagent_type="first-principles:first-principles") instead of answering '
+        "inline."
+    )

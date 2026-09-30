@@ -1,0 +1,101 @@
+# agent-router catalog for use next to the first-principles plugin
+# (https://github.com/chrisdavidson/first-principles-skill, MIT).
+#
+# Two checkpoints: at the main session, WHETHER to delegate to the first-principles agent;
+# inside that agent, an exact calculator when it reaches for python/bc to compute a figure
+# (Phase 4 estimates, the Phase 5 "recompute every computed figure" step). Everything inside the analysis (Step 0 technique selection, the
+# slash-only skills, the Self-Audit Gate) stays with first-principles, so no entry here
+# routes to an individual technique.
+#
+# Examples and native_examples are written independently of first-principles' routing
+# catalogs, which are used as the holdout in eval_set.yaml.
+version: "fp-2026-09-28.2"
+
+entries:
+  - id: first-principles-agent
+    kind: agent
+    name: First-principles analysis agent
+    project: first-principles-skill
+    license: MIT
+    url: https://github.com/chrisdavidson/first-principles-skill
+    target: first-principles:first-principles
+    points: [prompt, tool]
+    replaces: [Agent]
+    agents: [main]
+    threshold: 0.55  # calibrate.py, main-thread cal cases
+    what: >
+      Rebuild a claim, decision or design from verified fundamentals: challenge its
+      assumptions, establish ground truths and reason upward, not by analogy or convention.
+    not_for:
+      - debugging an error, a crash or a failing test
+      - reviewing code for style, naming or best practices
+      - a factual lookup, a definition or a formula
+      - configuring or setting up a tool or library
+      - summarizing or explaining an article
+    examples:
+      - break down from first principles whether our startup really needs a sales team
+      - question the underlying assumptions in the argument that nuclear power is too expensive
+      - reason from fundamentals about whether electric cars are actually greener over their lifetime
+      - is a four-day school week a good idea, or do we just assume five days because it's tradition
+      - what do we actually know is true about why interest rates affect house prices, reason up from there
+      - rethink our on-call rotation from scratch instead of copying what other companies do
+      - pressure-test the logic behind the claim that remote teams ship slower
+      - strip this decision down to its fundamentals, should we rewrite the billing service
+      - what are the irreducible facts behind the belief that breakfast is the most important meal
+      - challenge the conventional wisdom that you need a college degree to get a good job
+
+  - id: exact-calc
+    kind: tool
+    name: Exact calculator
+    project: agent-router (own code)
+    license: MIT
+    url: https://github.com/usathyan/agent-router
+    target: mcp__plugin_agent-router-fp_agent_router__calc
+    points: [tool]
+    replaces: [Bash]
+    agents: ["first-principles:first-principles"]
+    threshold: 0.8  # calibrate.py, first-principles-agent cal cases
+    fits: calc_expression  # only a one-expression call the calculator can run (core/fit.py)
+    what: >
+      Exact arithmetic (fractions, powers, percentages) with no floating point error.
+    not_for:
+      - writing, appending to or reading a file
+      - counting words or lines in a file
+      - running a program or a test suite
+    examples:
+      - python3 -c "print(0.17 * 2340)"
+      - python3 -c "print(10000 * 1.05 ** 7)"
+      - echo "scale=6; 1/3 + 2/7" | bc -l
+      - python -c "import math; print(math.sqrt(2) * 400)"
+      - node -e "console.log(3.5e6 / 12 / 30)"
+      - awk 'BEGIN { print 1500 * 0.07 * 12 }'
+      - python3 -c "print(sum([120, 85.5, 40.25]) / 3)"
+      - expr 365 \* 24 \* 60
+
+# Steps where the main session's own tools are enough (compete as the `none` option).
+native_examples:
+  - fix the null pointer exception in the checkout handler
+  - why does this unit test fail on CI but pass locally
+  - review my pull request for naming and formatting problems
+  - refactor this class to use dependency injection
+  - what is the time complexity of quicksort
+  - write a bash script that renames all .jpeg files to .jpg
+  - how do I install postgres on ubuntu
+  - explain what a closure is in javascript
+  - summarize this blog post about rust ownership
+  - what is the boiling point of water at high altitude
+  - list the main types of machine learning algorithms
+  - what is the formula for compound interest
+  - set up eslint and prettier for a react project
+  - my docker container keeps restarting, what should I check
+  - translate this paragraph into spanish
+  - what's the difference between TCP and UDP
+  - add pagination to the users endpoint
+  - what are the symptoms of vitamin D deficiency
+  - who invented the printing press
+  - search the codebase for where the auth token is refreshed
+  - date -u +%Y%m%dT%H%M%SZ
+  - git log --oneline -5
+  - ls -la
+  - cat README.md
+  - grep -rn "TODO" src
